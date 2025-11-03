@@ -3,8 +3,8 @@ import sys
 import os
 
 ## Description
-# this script reads an oxDNA trajectory file and rewrites the data into a new
-  # file with coarsened time steps, as set by the coarse_time parameter; 
+# this script reads a LAMMPS-style trajectory file and rewrites the data into a
+  # new file with coarsened time steps, as set by the coarse_time parameter; 
 # this can help reduce file sizes when the output frequency of the simulation
   # was not set appropriately, or when the simulation needed to be run for
   # longer than expected.
@@ -19,12 +19,12 @@ import os
 
 def main():
 
-    ### file parameters
-    datFile = sys.argv[1]
-    coarse_time = int(sys.argv[2])
+	### command line input
+	datFile = sys.argv[1]
+	coarse_time = int(sys.argv[2])
 
-    ### read old, write new
-    readWriteAtomDump(datFile, coarse_time)
+	### read old, write new
+	readWriteAtomDump(datFile, coarse_time)
 
 
 ################################################################################
@@ -32,72 +32,80 @@ def main():
 
 ### read oxdna trajectory
 def readWriteAtomDump(datFile, coarse_time):
-    outDatFile = datFile[:-4] + "_coarse" + datFile[-4:]
+	outDatFile = datFile[:-4] + "_coarse" + datFile[-4:]
 
-    ### extract metadata
-    print("Getting metadata from trajectory...")
-    testFileExist(datFile, "trajectory")
-    with open(datFile, 'r') as f:
+	### extract metadata
+	print("Getting metadata from trajectory...")
+	testFileExist(datFile, "trajectory")
+	with open(datFile, 'r') as f:
 
-        for i in range(4):
-            line = f.readline()
-        nbd_total = int(line.split()[0])
+		for i in range(4):
+			line = f.readline()
+		nbd_total = int(line.split()[0])
 
-        for i in range(2):
-            line = f.readline()
-        dbox = float(line.split()[1])
+		for i in range(2):
+			line = f.readline()
+		dbox = float(line.split()[1])
 
-        for i in range(nbd_total+5):
-            line = f.readline()
-        steps_per_record = int(line.split()[0])
+		for i in range(nbd_total+5):
+			line = f.readline()
+		steps_per_record = int(line.split()[0])
 
-    ### write new file
-    print("Writing coarsened trajectory...")
-    with open(outDatFile, 'w') as fout:
-        with open(datFile) as fin:
-            copy = True
-            steps_coarse = 0
-            steps_recorded = 0
-            while True:
-                line = fin.readline()
-                if not line:
-                    break
-                if len(line.split()) > 1 and line.split()[1] == 'TIMESTEP':
-                    steps_recorded += 1
-                    if steps_recorded % 100 == 0:
-                        print("Parsed " + str(steps_recorded) + " steps")
-                    current_position = fin.tell()
-                    next_line = fin.readline()
-                    step = int(next_line.split()[0])
-                    fin.seek(current_position)
-                    if step/steps_per_record % coarse_time == 0:
-                        copy = True
-                        steps_coarse += 1
-                    else:
-                        copy = False
-                if copy == True:
-                    fout.write(line)
+	### write new file
+	print("Writing coarsened trajectory...")
+	with open(outDatFile, 'w') as fout:
+		with open(datFile) as fin:
+			copy = True
+			steps_coarse = 0
+			steps_recorded = 0
+			while True:
+				line = fin.readline()
+				if not line:
+					break
+				if len(line.split()) > 1 and line.split()[1] == 'TIMESTEP':
+					steps_recorded += 1
+					if steps_recorded % 100 == 0:
+						print("Parsed " + str(steps_recorded) + " steps")
+					current_position = fin.tell()
+					next_line = fin.readline()
+					step = int(next_line.split()[0])
+					fin.seek(current_position)
+					if step/steps_per_record % coarse_time == 0:
+						copy = True
+						steps_coarse += 1
+					else:
+						copy = False
+				if copy == True:
+					fout.write(line)
 
-    ### report step counts
-    print("{:1.2e} steps in simulation".format(steps_recorded*steps_per_record))
-    print("{:1.2e} steps recorded".format(steps_recorded))
-    print("{:1.2e} steps after coarsening".format(steps_coarse))
+	### report step counts
+	print("{:1.2e} steps in simulation".format(steps_recorded*steps_per_record))
+	print("{:1.2e} steps recorded".format(steps_recorded))
+	print("{:1.2e} steps after coarsening".format(steps_coarse))
 
-    ### all finished
-    return
+	### all finished
+	return
 
 
 ################################################################################
 ### Utility Functions
 
 ### test if files exist
-def testFileExist(file, name):
-    if not os.path.isfile(file):
-        print("Error: Could not find " + name + " file:")
-        print(file + "\n")
-        sys.exit()
+def testFileExist(file, name="the", required=True):
+	if os.path.isfile(file):
+		return True
+	else:
+		if required:
+			print(f"Error: Could not find {name} file:")
+			print(file + "\n")
+			sys.exit()
+		else:
+			print(f"Flag: Could not find {name} file.")
+			return False
 
 
 ### run the script
 if __name__ == "__main__":
-    main()
+	main()
+	print()
+

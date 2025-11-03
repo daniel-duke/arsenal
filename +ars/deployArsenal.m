@@ -7,7 +7,7 @@ function deployArsenal(arsDepFold)
     end
 
     %%% location of arsenal folder
-    arsFold = "/Users/dduke/Files/analysis/arsenal/+ars/";
+    arsFold = "/Users/dduke/Programs/arsenal/+ars/";
 
     %%% get a list of all arsenal files
     arsFiles = dir(arsFold);

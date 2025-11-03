@@ -7,7 +7,8 @@ function colors = magicPlotLocal(fig)
     set(fig,'defaultLegendInterpreter','latex')
     set(fig,'defaultAxesTickLabelInterpreter','latex')
     set(fig,'defaultAxesFontSize',16)
-    set(fig,'defaultLineLineWidth',1.6);
+    set(fig,'defaultLineLineWidth',2);
+    set(fig,'defaultConstantLineLineWidth',2);
     set(fig,'defaultAxesBox','on');
     colors = lines(7);
 end

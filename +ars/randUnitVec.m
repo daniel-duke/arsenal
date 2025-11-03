@@ -1,5 +1,5 @@
-%%% get random unit vector with given number of dimensions
-function x = unitVecRand(ndim)
+%%% unit vector with random orientation and given number of dimensions
+function x = randUnitVec(ndim)
     arguments
         ndim double = 3
     end

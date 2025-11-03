@@ -42,6 +42,7 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 	useHbondSite 	= False		if 'useHbondSite' not in kwargs else kwargs['useHbondSite']
 	ignorePBC 		= False		if 'ignorePBC' not in kwargs else kwargs['ignorePBC']
 	getDbox3 		= False		if 'useDbox3' not in kwargs else kwargs['useDbox3']
+	report_every	= 1000		if 'report_every' not in kwargs else kwargs['report_every']
 
 	### notes
 	# assumes the bais array stores the base indices starting from 0.
@@ -137,7 +138,7 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 				point_count += 1
 		if not ignorePBC:
 			points[i] = ars.applyPBC( points[i], dbox3 )
-		if (i+1)%1000 == 0:
+		if (i+1)%report_every == 0:
 			print(f"processed {i+1} steps...")
 
 		### check backbone bond lengths
@@ -184,6 +185,7 @@ def readAtomDump(datFile, nstep_skip=0, coarse_time=1, bdis='all', coarse_points
 	ignorePBC		= False		if 'ignorePBC' not in kwargs else kwargs['ignorePBC']
 	getDbox3s		= False		if 'getDbox3s' not in kwargs else kwargs['getDbox3s']
 	getUsedEvery	= False		if 'getUsedEvery' not in kwargs else kwargs['getUsedEvery']
+	report_every	= 1000		if 'report_every' not in kwargs else kwargs['report_every']
 	
 	### notes
 	# assumes the bdis array stores the atom indices starting from 1.
@@ -268,7 +270,7 @@ def readAtomDump(datFile, nstep_skip=0, coarse_time=1, bdis='all', coarse_points
 				point_count += 1
 		if not ignorePBC:
 			points[i] = ars.applyPBC(points[i], dbox3s[i])
-		if (i+1)%1000 == 0:
+		if (i+1)%report_every == 0:
 			print(f"Processed {i+1} steps...")
 
 	### results
@@ -293,6 +295,125 @@ def getNstep(datFile, nstep_skip=0, coarse_time=1):
 	nstep_recorded = int(len(content)/(nbd_total+9))
 	nstep_trimmed = int((nstep_recorded-nstep_skip-1)/coarse_time)+1
 	return nstep_trimmed
+
+
+### read the given columns from a dump file
+def readDump(dumpFile, nstep_skip=0, coarse_time=1, cols="all", isInt=False):
+
+	### find dump file
+	print("Parsing LAMMPS-style dump...")
+	ars.testFileExist(dumpFile, "dump")
+
+	### get metadata
+	with open(dumpFile, 'r') as f:
+		content = iter(f)
+		for line in range(9):
+			next(content)
+		ncol_dump = len(next(content).split())
+
+	### interpret input
+	if cols == "all":
+		cols = np.arange(ncol_dump,dtype=int)
+	elif ars.isinteger(cols) and cols < ncol_dump:
+		cols = np.array([cols])
+	elif ars.isarray(cols) and ars.isinteger(cols[0]) and max(cols) < ncol_dump:
+		cols = np.array(cols)
+	else:
+		print("Error: Cannot read dump - columns must be 'all', integer, or 1D integer array.")
+		sys.exit()
+
+	### count columns
+	ncol = len(cols)
+
+	### initialize
+	data = []
+	step_count = 0
+
+	### loop over lines
+	with open(dumpFile, 'r') as f:
+		content = iter(f)
+		for line in content:
+
+			### do nothing with first line and skip next 2 lines
+			for line in range(2): next(content)
+
+			### count entries for this step
+			nentry = int(next(content))
+
+			### skip next 5 lines
+			for line in range(5): next(content)
+
+			### determine if skipping step
+			if step_count < nstep_skip or (step_count-nstep_skip)%coarse_time != 0:
+				for line in range(nentry):
+					next(content)
+
+			### if reading step
+			else:
+
+				### initialize step data
+				dtype = int if isInt else float
+				data_step = np.zeros((nentry,ncol), dtype=dtype)
+
+				### read data
+				for i in range(nentry):
+					line = next(content).split()
+					data_step[i] = [line[c] for c in cols]
+
+				### save step data
+				data.append(data_step)
+
+			### increase step count
+			step_count = step_count + 1
+
+	### result
+	return data
+
+
+### extract and plot thermo data from lammps output
+def plotThermo(reportFile="report.out", cols=["E_mol","TotEng"]):
+
+	### load report file
+	ars.testFileExist(reportFile, "report")
+	with open(reportFile, 'r') as f:
+		content = f.readlines()
+
+	### find thermo headers
+	idx_headers = [i for i, line in enumerate(content) if re.match(r'^\s*Step', line)]
+	if not idx_headers:
+		print("Error: Could not read thermo file - no thermo header (\"Step...\") found.")
+	idx_header = idx_headers[-1]
+	header = content[idx_header].split()
+
+	### read the data
+	data = []
+	for line in content[idx_header+1:]:
+		vals = line.split()
+		if len(vals) != len(header) or not ars.isnumber(vals[0]):
+			break
+		vals = list(map(float,vals))
+		data.append(vals)
+
+	### process data
+	if not data:
+		print("Error: Could not read thermo file - no data found after header.")
+		sys.exit()
+	data = np.array(data)
+	data_dict = {col: data[:,i] for i,col in enumerate(header)}
+	for col in cols:
+		if col not in data_dict:
+			print(f"Warning: '{col}' not found in thermo columns, skipping.")
+			continue
+
+	### plot all data
+	for col in cols:
+		ars.plotLine(data_dict["Step"], data_dict[col], figLabel="Thermo", label=col)
+	plt.xlabel("Time Step")
+	plt.legend()
+
+	### plot distributions
+	for col in cols:
+		ars.plotHist(data_dict[col], Alabel=col, figLabel=col, plotAvgLine=True, plotMedLine=True)
 
 
 ### read lammps-style geometry
@@ -818,10 +939,9 @@ def deployArsenal(srcFold=os.getcwd()+"/"):
 	for root, dirs, files in os.walk(srcFold):
 		dirs[:] = [d for d in dirs if not d.startswith(".") and d != "__pycache__"]
 		for file in files:
-			if file.startswith("."):
-				continue
-			srcFile = os.path.join(root, file)
-			ars_refs.extend(ars.findArsReferences(srcFile, display=False))
+			if file.endswith(".py"):
+				srcFile = os.path.join(root, file)
+				ars_refs.extend(ars.findArsReferences(srcFile, display=False))
 
 	### write deployed arsenal file
 	deployed_functions = []
@@ -1084,7 +1204,9 @@ def plotHist(A, Alabel=None, title=None, figLabel="Hist", nbin='auto', Alim_bin=
 	weights			= None		if 'weights' not in kwargs else kwargs['weights']
 	plotAsLine		= False		if 'plotAsLine' not in kwargs else kwargs['plotAsLine']
 	plotAvgLine		= False		if 'plotAvgLine' not in kwargs else kwargs['plotAvgLine']
-	avgLabel		= None	if 'avgLabel' not in kwargs else kwargs['avgLabel']
+	plotMedLine		= False		if 'plotMedLine' not in kwargs else kwargs['plotMedLine']
+	avgLabel		= None		if 'avgLabel' not in kwargs else kwargs['avgLabel']
+	medLabel		= None		if 'medLabel' not in kwargs else kwargs['medLabel']
 	alpha			= 0.6		if 'alpha' not in kwargs else kwargs['alpha']
 
 	### notes
@@ -1098,6 +1220,9 @@ def plotHist(A, Alabel=None, title=None, figLabel="Hist", nbin='auto', Alim_bin=
 		return
 	if isinstance(Alim_bin, str) and Alim_bin == 'auto':
 		Alim_bin = [ min(A), max(A) ]
+		if Alim_bin[0] == Alim_bin[1]:
+			print("Flag: Skipping hitogram plot - all values are the same.")
+			return
 	elif not ars.isarray(Alim_bin) or len(Alim_bin) != 2:
 		print("Flag: Skipping histogram plot - variable limits must be either 'auto' or 2-element array.")
 		return
@@ -1111,6 +1236,10 @@ def plotHist(A, Alabel=None, title=None, figLabel="Hist", nbin='auto', Alim_bin=
 		avgLabel = "$\\mu_{\\textrm{" + f"{avgLabel}" + "}}$"
 	else:
 		avgLabel = f"$\\mu$"
+	if medLabel is not None:
+		medLabel = "$M_{\\textrm{" + f"{avgLabel}" + "}}$"
+	else:
+		medLabel = f"$M$"
 
 	### plot histogram
 	plt.figure(figLabel)
@@ -1122,6 +1251,8 @@ def plotHist(A, Alabel=None, title=None, figLabel="Hist", nbin='auto', Alim_bin=
 		plt.plot(edges, heights, color='black')
 	if plotAvgLine:
 		plt.axvline(np.mean(A), color='red', linestyle='--', label=f"{avgLabel} = {np.mean(A):0.2f}")
+	if plotMedLine:
+		plt.axvline(np.median(A), color='red', linestyle='-.', label=f"{medLabel} = {np.median(A):0.2f}")
 	plt.xlim(Alim_plot)
 	if Alabel is not None:
 		plt.xlabel(Alabel)
@@ -1134,7 +1265,7 @@ def plotHist(A, Alabel=None, title=None, figLabel="Hist", nbin='auto', Alim_bin=
 		plt.ylabel(Ylabel)
 	if title is not None:
 		plt.title(title)
-	if plotAvgLine:
+	if plotAvgLine or plotMedLine:
 		plt.legend()
 
 
@@ -1775,7 +1906,7 @@ def movingAvg(A, stride=1):
 ################################################################################
 ### Expressions
 
-### divide vector my magnitude
+### divide vector by magnitude
 def unitVector(vector):
 	return vector / np.linalg.norm(vector)
 
@@ -1804,7 +1935,7 @@ def applyPBC(r, dbox):
 	return r - dbox*np.round(r/dbox)
 
 
-### get random unit vector with given number of dimensions
+### unit vector with random orientaiton and given number of dimensions
 def randUnitVec(rng=np.random, ndim=3):
 	return ars.unitVector(rng.normal(size=ndim))
 
@@ -1904,10 +2035,10 @@ def createEmptyFold(newFold):
 
 ### render sequential array compactly
 def compressSeqArr(A):
-    if all(A[i]+1 == A[i+1] for i in range(len(A)-1)):
-        return f"[ {A[0]} ... {A[-1]} ]"
-    else:
-        return str(A)
+	if all(A[i]+1 == A[i+1] for i in range(len(A)-1)):
+		return f"[ {A[0]} ... {A[-1]} ]"
+	else:
+		return str(A)
 
 
 ### test if variable is numeric (both float and integer count)
