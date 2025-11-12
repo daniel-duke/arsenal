@@ -1205,8 +1205,10 @@ def plotHist(A, Alabel=None, title=None, figLabel="Hist", nbin='auto', Alim_bin=
 	plotAsLine		= False		if 'plotAsLine' not in kwargs else kwargs['plotAsLine']
 	plotAvgLine		= False		if 'plotAvgLine' not in kwargs else kwargs['plotAvgLine']
 	plotMedLine		= False		if 'plotMedLine' not in kwargs else kwargs['plotMedLine']
+	plotStdLines	= False		if 'plotStdLines' not in kwargs else kwargs['plotStdLines']
 	avgLabel		= None		if 'avgLabel' not in kwargs else kwargs['avgLabel']
 	medLabel		= None		if 'medLabel' not in kwargs else kwargs['medLabel']
+	stdLabel		= None		if 'stdLabel' not in kwargs else kwargs['stdLabel']
 	alpha			= 0.6		if 'alpha' not in kwargs else kwargs['alpha']
 
 	### notes
@@ -1240,6 +1242,18 @@ def plotHist(A, Alabel=None, title=None, figLabel="Hist", nbin='auto', Alim_bin=
 		medLabel = "$M_{\\textrm{" + f"{avgLabel}" + "}}$"
 	else:
 		medLabel = f"$M$"
+	if stdLabel is not None:
+		stdLabel = "$\\sigma_{\\textrm{" + f"{avgLabel}" + "}}$"
+	else:
+		stdLabel = f"$\\sigma$"
+
+	### calculate statistics
+	if plotAvgLine or plotStdLines:
+		avg = np.mean(A)
+	if plotMedLine:
+		med = np.median(A)
+	if plotStdLines:
+		std = np.std(A)
 
 	### plot histogram
 	plt.figure(figLabel)
@@ -1250,9 +1264,12 @@ def plotHist(A, Alabel=None, title=None, figLabel="Hist", nbin='auto', Alim_bin=
 		edges = edges[:len(edges)-1] + 1/2*(edges[1]-edges[0])
 		plt.plot(edges, heights, color='black')
 	if plotAvgLine:
-		plt.axvline(np.mean(A), color='red', linestyle='--', label=f"{avgLabel} = {np.mean(A):0.2f}")
+		plt.axvline(avg, color='red', linestyle='--', label=f"{avgLabel} = {avg:0.2f}")
 	if plotMedLine:
-		plt.axvline(np.median(A), color='red', linestyle='-.', label=f"{medLabel} = {np.median(A):0.2f}")
+		plt.axvline(med, color='red', linestyle='-.', label=f"{medLabel} = {med:0.2f}")
+	if plotStdLines:
+		plt.axvline(avg+std, color='red', linestyle=':', label=f"{stdLabel} = {std:0.2f}")
+		plt.axvline(avg-std, color='red', linestyle=':')
 	plt.xlim(Alim_plot)
 	if Alabel is not None:
 		plt.xlabel(Alabel)
@@ -1578,7 +1595,7 @@ def calcPMF(ops, weights, op_ts, tsFold, nbin, bin_padding, whamMetaFile, whamOu
 
 
 ### shift trajectory, placing the given point at the center, optionally unwrapping molecules at boundary
-def centerPointsMolecule(points, molecules, dbox3s, center=1, unwrap=True):
+def centerPointsMolecule(points, molecules, dbox3s, center=1, unwrap=True, report_every=100):
 
 	### notes
 	# as the notation suggests, the indices contained in molecules must start at 1.
@@ -1622,14 +1639,14 @@ def centerPointsMolecule(points, molecules, dbox3s, center=1, unwrap=True):
 		### set centering point
 		if center == 'none':
 			com = np.zeros(3)
-		elif center == 'com_points' or center == 'com_beads' or center == 'com_bases':
+		elif center == 'com' or center == 'com_points' or center == 'com_beads' or center == 'com_bases':
 			com = ars.calcCOMnoDummy(points[i], dbox3s[i])
 		elif center == 'com_molecules' or center == 'com_clusters':
 			com = ars.calcCOMnoDummy(molecule_coms, dbox3s[i])
 		elif ars.isinteger(center) and center <= nmolecule:
 			com = molecule_coms[center-1,:]
 		else:
-			print("Error: Cannot center points - center must be either 'none', 'com_points', 'com_molecules', or integer <= nmolecule.\n")
+			print("Error: Cannot center points - center must be either 'none', 'com', 'com_molecules', or integer <= nmolecule.\n")
 			sys.exit()
 
 		### center the points
@@ -1648,8 +1665,8 @@ def centerPointsMolecule(points, molecules, dbox3s, center=1, unwrap=True):
 				points_centered[i,j] = ref + ars.applyPBC(points_centered[i,j]-ref, dbox3s[i])
 
 		### progress update
-		if (i+1)%1000 == 0:
-			print(f"Centered {i+1} steps...")
+		if report_every and (i+1)%report_every == 0:
+			print(f"centered {i+1} steps...")
 
 	### result
 	return points_centered

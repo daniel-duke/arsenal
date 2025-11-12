@@ -37,17 +37,16 @@ def main():
 		report_every = int(sys.argv[5])
 
 	### read file (no skipped steps, no coarsening)
-	points, col2s, dbox3s, dump_every = readAtomDump(datFile, report_every); print()
+	points, col2s, dbox3s, dump_every = readAtomDump(datFile, report_every)
+	if report_every: print()
 
 	### center the points
 	points_centered = centerPointsMolecule(points, col2s, dbox3s, center, unwrap, report_every)
+	if report_every: print()
 
 	### write output file
 	outDatFile = datFile[:(len(datFile)-4)] + "_centered" + datFile[(len(datFile)-4):]
 	writeAtomDump(outDatFile, points_centered, col2s, dbox3s, dump_every, set_color)
-
-	### for nice output
-	if report_every: print()
 
 
 ################################################################################
