@@ -15,7 +15,7 @@ import os
 
 
 ################################################################################
-### Parameters
+### Heart
 
 def main():
 
@@ -28,27 +28,24 @@ def main():
 
 
 ################################################################################
-### File Parsers
+### File Managers
 
-### read oxdna trajectory
+### read LAMMPS-style atom dump, write coarsened one
 def readWriteAtomDump(datFile, coarse_time):
 	outDatFile = datFile[:-4] + "_coarse" + datFile[-4:]
 
 	### extract metadata
 	print("Getting metadata from trajectory...")
-	testFileExist(datFile, "trajectory")
+	checkFileExist(datFile, "trajectory")
 	with open(datFile, 'r') as f:
 
-		for i in range(4):
-			line = f.readline()
+		for i in range(4): line = f.readline()
 		nbd_total = int(line.split()[0])
 
-		for i in range(2):
-			line = f.readline()
+		for i in range(2): line = f.readline()
 		dbox = float(line.split()[1])
 
-		for i in range(nbd_total+5):
-			line = f.readline()
+		for i in range(nbd_total+5): line = f.readline()
 		steps_per_record = int(line.split()[0])
 
 	### write new file
@@ -65,7 +62,7 @@ def readWriteAtomDump(datFile, coarse_time):
 				if len(line.split()) > 1 and line.split()[1] == 'TIMESTEP':
 					steps_recorded += 1
 					if steps_recorded % 100 == 0:
-						print("Parsed " + str(steps_recorded) + " steps")
+						print("parsed " + str(steps_recorded) + " steps...")
 					current_position = fin.tell()
 					next_line = fin.readline()
 					step = int(next_line.split()[0])
@@ -83,15 +80,15 @@ def readWriteAtomDump(datFile, coarse_time):
 	print("{:1.2e} steps recorded".format(steps_recorded))
 	print("{:1.2e} steps after coarsening".format(steps_coarse))
 
-	### all finished
+	### result
 	return
 
 
 ################################################################################
 ### Utility Functions
 
-### test if files exist
-def testFileExist(file, name="the", required=True):
+### determine if file exists
+def checkFileExist(file, name="the", required=True):
 	if os.path.isfile(file):
 		return True
 	else:

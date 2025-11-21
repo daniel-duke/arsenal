@@ -42,6 +42,7 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 	useHbondSite 	= False		if 'useHbondSite' not in kwargs else kwargs['useHbondSite']
 	ignorePBC 		= False		if 'ignorePBC' not in kwargs else kwargs['ignorePBC']
 	getDbox3 		= False		if 'useDbox3' not in kwargs else kwargs['useDbox3']
+	getUsedEvery	= False		if 'getUsedEvery' not in kwargs else kwargs['getUsedEvery']
 	report_every	= 1000		if 'report_every' not in kwargs else kwargs['report_every']
 
 	### notes
@@ -55,7 +56,7 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 
 	### load trajectory file
 	print("Loading oxDNA trajectory...")
-	ars.testFileExist(datFile, "trajectory")
+	ars.checkFileExist(datFile, "trajectory")
 	with open(datFile, 'r') as f:
 		content = f.readlines()
 	print("Parsing trajectory...")
@@ -65,7 +66,9 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 	while nba_total+3 < len(content) and ars.isnumber(content[nba_total+3].split()[0]):
 		nba_total += 1
 	dbox3 = np.array(content[1].split()[2:5],dtype=float)
-	dump_every = int(content[nba_total+3].split()[2]) - int(content[0].split()[2])
+	dump_every = 0
+	if len(content) > nba_total+3:
+		dump_every = int(content[nba_total+3].split()[2]) - int(content[0].split()[2])
 	nstep_recorded = int(len(content)/(nba_total+3))
 	nstep_trimmed = int((nstep_recorded-nstep_skip)/coarse_time)
 	if nstep_trimmed <= 0:
@@ -175,6 +178,7 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 	output = [ points, dbox3[0] ]
 	if getDbox3: output[-1] = dbox3
 	if len(bais) > 1: output.append(groups)
+	if getUsedEvery: output.append(dump_every*coarse_time)
 	return output
 
 
@@ -197,14 +201,16 @@ def readAtomDump(datFile, nstep_skip=0, coarse_time=1, bdis='all', coarse_points
 
 	### load trajectory file
 	print("Loading LAMMPS-style trajectory...")
-	ars.testFileExist(datFile, "trajectory")
+	ars.checkFileExist(datFile, "trajectory")
 	with open(datFile, 'r') as f:
 		content = f.readlines()
 	print("Parsing trajectory...")
 
 	### extract metadata
 	nbd_total = int(content[3].split()[0])
-	dump_every = int(content[nbd_total+10].split()[0]) - int(content[1].split()[0])
+	dump_every = 0
+	if len(content) > nbd_total+10:
+		dump_every = int(content[nbd_total+10].split()[0]) - int(content[1].split()[0])
 	nstep_recorded = int(len(content)/(nbd_total+9))
 	nstep_trimmed = int((nstep_recorded-nstep_skip-1)/coarse_time)+1
 	if nstep_trimmed <= 0:
@@ -286,7 +292,7 @@ def readAtomDump(datFile, nstep_skip=0, coarse_time=1, bdis='all', coarse_points
 def getNstep(datFile, nstep_skip=0, coarse_time=1):
 
 	### load trajectory file
-	ars.testFileExist(datFile, "trajectory")
+	ars.checkFileExist(datFile, "trajectory")
 	with open(datFile, 'r') as f:
 		content = f.readlines()
 
@@ -298,11 +304,14 @@ def getNstep(datFile, nstep_skip=0, coarse_time=1):
 
 
 ### read the given columns from a dump file
-def readDump(dumpFile, nstep_skip=0, coarse_time=1, cols="all", isInt=False):
+def readDump(dumpFile, nstep_skip=0, coarse_time=1, cols='all', nstep_max='all', **kwargs):
+
+	### additional keyword arguments
+	isInt = False if 'isInt' not in kwargs else kwargs['isInt']
 
 	### find dump file
 	print("Parsing LAMMPS-style dump...")
-	ars.testFileExist(dumpFile, "dump")
+	ars.checkFileExist(dumpFile, "dump")
 
 	### get metadata
 	with open(dumpFile, 'r') as f:
@@ -312,7 +321,7 @@ def readDump(dumpFile, nstep_skip=0, coarse_time=1, cols="all", isInt=False):
 		ncol_dump = len(next(content).split())
 
 	### interpret input
-	if cols == "all":
+	if cols == 'all':
 		cols = np.arange(ncol_dump,dtype=int)
 	elif ars.isinteger(cols) and cols < ncol_dump:
 		cols = np.array([cols])
@@ -320,6 +329,11 @@ def readDump(dumpFile, nstep_skip=0, coarse_time=1, cols="all", isInt=False):
 		cols = np.array(cols)
 	else:
 		print("Error: Cannot read dump - columns must be 'all', integer, or 1D integer array.")
+		sys.exit()
+	if isinstance(nstep_max, str) and nstep_max == 'all':
+		nstep_max = 0
+	elif not ars.isinteger(nstep_max):
+		print("Error: Cannot read dump - max number of steps must be 'all' or integer.\n")
 		sys.exit()
 
 	### count columns
@@ -363,6 +377,10 @@ def readDump(dumpFile, nstep_skip=0, coarse_time=1, cols="all", isInt=False):
 				### save step data
 				data.append(data_step)
 
+				### stop collecting data
+				if len(data) == nstep_max:
+					break
+
 			### increase step count
 			step_count = step_count + 1
 
@@ -374,7 +392,7 @@ def readDump(dumpFile, nstep_skip=0, coarse_time=1, cols="all", isInt=False):
 def plotThermo(reportFile="report.out", cols=["E_mol","TotEng"]):
 
 	### load report file
-	ars.testFileExist(reportFile, "report")
+	ars.checkFileExist(reportFile, "report")
 	with open(reportFile, 'r') as f:
 		content = f.readlines()
 
@@ -430,7 +448,7 @@ def readGeo(geoFile, **kwargs):
 	  # the bonds all start from 1.
 
 	### load geometry file
-	ars.testFileExist(geoFile, "geometry")
+	ars.checkFileExist(geoFile, "geometry")
 	with open(geoFile, 'r') as f:
 		content = f.readlines()
 
@@ -571,7 +589,7 @@ def readGeo(geoFile, **kwargs):
 
 ### read wham output
 def readWham(whamFile, nbin):
-	ars.testFileExist(whamFile, "wham")
+	ars.checkFileExist(whamFile, "wham")
 	with open(whamFile, 'r') as f:
 		content = f.readlines()
 	op = np.zeros(nbin)
@@ -586,7 +604,7 @@ def readWham(whamFile, nbin):
 
 ### read my umbrella sampling metadata file
 def readUSmeta(metaFile):
-	ars.testFileExist(metaFile, "metadata")
+	ars.checkFileExist(metaFile, "metadata")
 	with open(metaFile, 'r') as f:
 		content = f.readlines()
 	content = ars.cleanFileContent(content)
@@ -601,7 +619,7 @@ def readUSmeta(metaFile):
 
 ### read cluster file
 def readCluster(clusterFile):
-	ars.testFileExist(clusterFile, "cluster")
+	ars.checkFileExist(clusterFile, "cluster")
 	with open(clusterFile, 'r') as f:
 		content = f.readlines()
 	content = ars.cleanFileContent(content)
@@ -617,7 +635,7 @@ def readCluster(clusterFile):
 	
 ### read file containing simulation folder names
 def readCopies(copiesFile):
-	ars.testFileExist(copiesFile, "copies")
+	ars.checkFileExist(copiesFile, "copies")
 	with open(copiesFile, 'r') as f:
 		content = f.readlines()
 	content = ars.cleanFileContent(content)
@@ -658,7 +676,7 @@ def cleanFileContent(content):
 def findArsReferences(searchFile=sys.argv[0], display=True):
 
 	### read content of search file
-	ars.testFileExist(searchFile, "search")
+	ars.checkFileExist(searchFile, "search")
 	with open(searchFile, 'r') as f:
 		content = f.read()
 
@@ -862,7 +880,7 @@ def writeGeo(geoFile, dbox3, r, molecules='auto', types='auto', bonds=None, angl
 def unpickle(pklFile, dims=None, hushExtraFlag=False):
 
 	### read file
-	ars.testFileExist(pklFile, "pickle")
+	ars.checkFileExist(pklFile, "pickle")
 	with open(pklFile, 'rb') as f:
 		cucumber = pickle.load(f)
 
@@ -921,7 +939,7 @@ def deployArsenal(srcFold=os.getcwd()+"/"):
 	arsDepFile = srcFold + "armament.py"
 
 	### get arsenal code
-	testFileExist(arsFile, 'arsenal')
+	checkFileExist(arsFile, 'arsenal')
 	with open(arsFile, 'r') as f:
 		ars_code = f.readlines()
 
@@ -1118,9 +1136,8 @@ def plotPoints(X, Y, title=None, figLabel="Points", Xlim='auto', Ylim='auto', Xl
 	### additional keyword args
 	S			= None		if 'S' not in kwargs else kwargs['S']
 	marker		= 'o'		if 'marker' not in kwargs else kwargs['marker']
-	edgecolors	= 'none'	if 'edgecolors' not in kwargs else kwargs['edgecolors']
 	color		= 'black'	if 'color' not in kwargs else kwargs['color']
-	facecolors	= None		if 'facecolors' not in kwargs else kwargs['facecolors']
+	edgecolor	= None		if 'edgecolor' not in kwargs else kwargs['edgecolor']
 	alpha		= None		if 'alpha' not in kwargs else kwargs['alpha']
 	zorder		= None		if 'zorder' not in kwargs else kwargs['zorder']
 	label		= None		if 'label' not in kwargs else kwargs['label']
@@ -1141,7 +1158,7 @@ def plotPoints(X, Y, title=None, figLabel="Points", Xlim='auto', Ylim='auto', Xl
 		plt.errorbar(X, Y, E, fmt='none', ecolor=ecolor, capsize=ecapsize, linewidth=elinewidth, capthick=elinewidth)
 
 	### plot points
-	plt.scatter(X, Y, S, marker=marker, color=color, edgecolors=edgecolors, facecolors=facecolors, alpha=alpha, zorder=zorder,label=label)
+	plt.scatter(X, Y, S, marker=marker, color=color, edgecolor=edgecolor, alpha=alpha, zorder=zorder, label=label)
 
 	### format
 	if Xlim != 'auto':
@@ -1202,19 +1219,31 @@ def plotHist(A, Alabel=None, title=None, figLabel="Hist", nbin='auto', Alim_bin=
 
 	### additional keyword args
 	weights			= None		if 'weights' not in kwargs else kwargs['weights']
-	plotAsLine		= False		if 'plotAsLine' not in kwargs else kwargs['plotAsLine']
-	plotAvgLine		= False		if 'plotAvgLine' not in kwargs else kwargs['plotAvgLine']
-	plotMedLine		= False		if 'plotMedLine' not in kwargs else kwargs['plotMedLine']
-	plotStdLines	= False		if 'plotStdLines' not in kwargs else kwargs['plotStdLines']
-	avgLabel		= None		if 'avgLabel' not in kwargs else kwargs['avgLabel']
-	medLabel		= None		if 'medLabel' not in kwargs else kwargs['medLabel']
-	stdLabel		= None		if 'stdLabel' not in kwargs else kwargs['stdLabel']
+	plotBins		= True		if 'plotBins' not in kwargs else kwargs['plotBins']
+	plotLine		= False		if 'plotLine' not in kwargs else kwargs['plotLine']
+	plotGauss		= False		if 'plotGauss' not in kwargs else kwargs['plotGauss']
+	color			= None		if 'color' not in kwargs else kwargs['color']
 	alpha			= 0.6		if 'alpha' not in kwargs else kwargs['alpha']
+	label			= None		if 'label' not in kwargs else kwargs['label']
+	plotAvg			= False		if 'plotAvg' not in kwargs else kwargs['plotAvg']
+	plotMed			= False		if 'plotMed' not in kwargs else kwargs['plotMed']
+	plotStd			= False		if 'plotStd' not in kwargs else kwargs['plotStd']
+	avg_label		= 'auto'	if 'avg_label' not in kwargs else kwargs['avg_label']
+	avg_color		= 'red'		if 'avg_color' not in kwargs else kwargs['avg_color']
+	med_label		= 'auto'	if 'med_label' not in kwargs else kwargs['med_label']
+	med_color		= 'red'		if 'med_color' not in kwargs else kwargs['med_color']
+	std_label		= 'auto'	if 'std_label' not in kwargs else kwargs['std_label']
+	std_color		= 'red'		if 'std_color' not in kwargs else kwargs['std_color']
 
-	### notes
-	# if plotting multiple histograms in the same plot, be careful with plotAvgLine (the legend might be wonky)
+	### ensure valid plot type combination
+	if not plotBins and not plotLine and not plotGauss:
+		print("Flag: Skipping histogram plot - at least one plot type (bins, line, gauss) must be true.")
+		return
+	if plotLine and plotGauss:
+		print("Flag: Skipping histogram plot - cannot plot both line and gauss.")
+		return
 
-	### interpret input
+	### interpret binning input
 	if isinstance(nbin, str) and nbin == 'auto':
 		nbin = ars.optbins(A, 50)
 	elif not ars.isinteger(nbin):
@@ -1232,45 +1261,105 @@ def plotHist(A, Alabel=None, title=None, figLabel="Hist", nbin='auto', Alim_bin=
 		dAbin = (Alim_bin[1]-Alim_bin[0])/nbin
 		Alim_plot = [ Alim_bin[0]-dAbin/2, Alim_bin[1]+dAbin/2 ]
 	elif not ars.isarray(Alim_plot) or len(Alim_plot) != 2:
-		print("Flag: Skipping histogram plot - variable limits must be either 'auto' or 2-element array.")
-		return
-	if avgLabel is not None:
-		avgLabel = "$\\mu_{\\textrm{" + f"{avgLabel}" + "}}$"
-	else:
-		avgLabel = f"$\\mu$"
-	if medLabel is not None:
-		medLabel = "$M_{\\textrm{" + f"{avgLabel}" + "}}$"
-	else:
-		medLabel = f"$M$"
-	if stdLabel is not None:
-		stdLabel = "$\\sigma_{\\textrm{" + f"{avgLabel}" + "}}$"
-	else:
-		stdLabel = f"$\\sigma$"
+		if Alim_plot is not None:
+			print("Flag: Skipping histogram plot - variable limits must be None, 'auto', or 2-element array.")
+			return
+
+	### interpret line labels
+	if avg_label == 'auto':
+		avg_label = f"$\\mu$"
+	elif avg_label is not None:
+		avg_label = "$\\mu_{\\textrm{" + f"{avg_label}" + "}}$"
+	if med_label == 'auto':
+		med_label = f"$M$"
+	elif med_label is not None:
+		med_label = "$M_{\\textrm{" + f"{med_label}" + "}}$"
+	if std_label == 'auto':
+		std_label = f"$\\sigma$"
+	elif std_label is not None:
+		std_label = "$\\sigma_{\\textrm{" + f"{std_label}" + "}}$"
 
 	### calculate statistics
-	if plotAvgLine or plotStdLines:
+	if plotAvg or plotStd:
 		avg = np.mean(A)
-	if plotMedLine:
+	if plotMed:
 		med = np.median(A)
-	if plotStdLines:
+	if plotStd:
 		std = np.std(A)
 
-	### plot histogram
+	### plot histogram bins
 	plt.figure(figLabel)
-	if plotAsLine == False:
-		plt.hist(A, nbin, weights=weights, range=Alim_bin, density=useDensity, alpha=alpha, edgecolor='black')
-	else:
+	if plotBins:
+		patches = plt.hist(A, nbin, weights=weights, range=Alim_bin, density=useDensity, color=color, alpha=alpha)[2]
+		if not plotLine and not plotGauss:
+			plt.hist(A, nbin, weights=weights, range=Alim_bin, density=useDensity, facecolor='none', edgecolor='black')
+		if label is not None:
+			patches[0].set_label(label)
+		color = patches[0].get_facecolor()
+
+	### plot histogram as line
+	if plotLine:
 		heights, edges = np.histogram(A, nbin, weights=weights, range=Alim_bin, density=useDensity)
 		edges = edges[:len(edges)-1] + 1/2*(edges[1]-edges[0])
-		plt.plot(edges, heights, color='black')
-	if plotAvgLine:
-		plt.axvline(avg, color='red', linestyle='--', label=f"{avgLabel} = {avg:0.2f}")
-	if plotMedLine:
-		plt.axvline(med, color='red', linestyle='-.', label=f"{medLabel} = {med:0.2f}")
-	if plotStdLines:
-		plt.axvline(avg+std, color='red', linestyle=':', label=f"{stdLabel} = {std:0.2f}")
-		plt.axvline(avg-std, color='red', linestyle=':')
-	plt.xlim(Alim_plot)
+		curve = plt.plot(edges, heights, color=color, linewidth=2, alpha=1)[0]
+		if not plotBins:
+			color = curve.get_color()
+			if label is not None:
+				curve.set_label(label)
+
+	### plot histogram as gaussian kernel-density estimate
+	if plotGauss:
+		pdf = gaussian_kde(A, weights=weights)
+		X = np.linspace(Alim_bin[0], Alim_bin[1], 100)
+		Y = pdf(X)
+		if not useDensity:
+			dA_bin = (Alim_bin[1]-Alim_bin[0])/nbin
+			Y *= len(A)*dA_bin
+		curve = plt.plot(X, Y, color=color, linewidth=2, alpha=1)[0]
+		if not plotBins:
+			color_data = curve.get_color()
+			if label is not None:
+				curve.set_label(label)
+
+	### plot average line
+	if plotAvg:
+		line = plt.axvline(avg, linestyle='--', linewidth=2, alpha=1)
+		if avg_color == 'match':
+			line.set_color(color)
+		else:
+			line.set_color(avg_color)
+		if avg_label is not None:
+			line.set_label(f"{avg_label} = {avg:0.2f}")
+
+	### plot median line
+	if plotMed:
+		line = plt.axvline(med, linestyle='-.', linewidth=2, alpha=1)
+		if med_color == 'match':
+			line.set_color(color)
+		else:
+			line.set_color(med_color)
+		if med_label is not None:
+			line.set_label(f"{med_label} = {med:0.2f}")
+
+	### plot standard deviation lines
+	if plotStd:
+		line = plt.axvline(avg+std, linestyle=':', linewidth=2, alpha=1)
+		if std_color == 'match':
+			line.set_color(color)
+		else:
+			line.set_color(std_color)
+		line = plt.axvline(avg-std, linestyle=':', linewidth=2, alpha=1)
+		if std_color == 'match':
+			line.set_color(color)
+		else:
+			line.set_color(std_color)
+		if std_label is not None:
+			line.set_label(f"{std_label} = {std:0.2f}")
+
+	### formatting
+	plt.ylim(bottom=0, auto=True)
+	if Alim_plot is not None:
+		plt.xlim(Alim_plot)
 	if Alabel is not None:
 		plt.xlabel(Alabel)
 	if Ylabel == 'auto':
@@ -1282,12 +1371,12 @@ def plotHist(A, Alabel=None, title=None, figLabel="Hist", nbin='auto', Alim_bin=
 		plt.ylabel(Ylabel)
 	if title is not None:
 		plt.title(title)
-	if plotAvgLine or plotMedLine:
+	if label or (plotAvg and avg_label is not None) or (plotMed and med_label is not None) or (plotStd and std_label is not None):
 		plt.legend()
 
 
 ### plot a nice 2D histogram
-def plotHist2D(A, B, Alabel=None, Blabel=None, title=None, figLabel="Hist", nbin='auto', Alim_bin='auto', Blim_bin='auto', Alim_plot='auto', Blim_plot='auto'):
+def plotHist2D(A, B, Alabel=None, Blabel=None, title=None, figLabel="Hist", nbin='auto', Alim_bin='auto', Blim_bin='auto', Alim_plot='auto', Blim_plot='auto', useDensity=False):
 
 	### interpret input
 	if isinstance(nbin, str) and nbin == 'auto':
@@ -1309,20 +1398,24 @@ def plotHist2D(A, B, Alabel=None, Blabel=None, title=None, figLabel="Hist", nbin
 		dAbin = (Alim_bin[1]-Alim_bin[0])/nbin
 		Alim_plot = [ Alim_bin[0], Alim_bin[1] ]
 	elif not ars.isarray(Alim_plot) or len(Alim_plot) != 2:
-		print("Flag: Skipping histogram plot - variable limits must be either 'auto' or 2-element array.")
-		return
+		if Alim_plot is not None:
+			print("Flag: Skipping histogram plot - variable limits must be None, 'auto', or 2-element array.")
+			return
 	if isinstance(Blim_plot, str) and Blim_plot == 'auto':
 		dBbin = (Blim_bin[1]-Blim_bin[0])/nbin
 		Blim_plot = [ Blim_bin[0], Blim_bin[1] ]
 	elif not ars.isarray(Blim_plot) or len(Blim_plot) != 2:
-		print("Flag: Skipping histogram plot - variable limits must be either 'auto' or 2-element array.")
-		return
+		if Blim_plot is not None:
+			print("Flag: Skipping histogram plot - variable limits must be None, 'auto', or 2-element array.")
+			return
 
 	### plot histogram
 	plt.figure(figLabel)
-	plt.hist2d(A, B, nbin, range=[Alim_bin,Blim_bin], density=useDensity, edgecolor='none')
-	plt.xlim(Alim_plot)
-	plt.ylim(Blim_plot)
+	plt.hist2d(A, B, nbin, range=[Alim_bin,Blim_bin], density=useDensity)
+	if Alim_plot is not None:
+		plt.xlim(Alim_plot)
+	if Blim_plot is not None:
+		plt.ylim(Blim_plot)
 	if Alabel is not None:
 		plt.xlabel(Alabel)
 	if Blabel is not None:
@@ -1353,8 +1446,9 @@ def plotPMF(A, Alabel=None, title=None, figLabel="PMF", nbin='auto', Alim_bin='a
 		dAbin = (Alim_bin[1]-Alim_bin[0])/nbin
 		Alim_plot = [ Alim_bin[0]-dAbin/2, Alim_bin[1]+dAbin/2 ]
 	elif not ars.isarray(Alim_plot) or len(Alim_plot) != 2:
-		print("Error: Cannot calculate PMF - variable limits must be either 'auto' or 2-element array.\n")
-		sys.exit()
+		if Alim_plot is not None:
+			print("Error: Cannot calculate PMF - variable limits must be either 'auto' or 2-element array.\n")
+			sys.exit()
 	if zero != 'min' and zero != 'max':
 		print("Error: Cannot calculate PMF - zero must be either 'min' or 'max'.\n")
 		sys.exit()
@@ -1375,7 +1469,8 @@ def plotPMF(A, Alabel=None, title=None, figLabel="PMF", nbin='auto', Alim_bin='a
 	### plot PMF
 	plt.figure(figLabel)
 	plt.plot(bins, PMF, '-o', color=color)
-	plt.xlim(Alim_plot)
+	if Alim_plot is not None:
+		plt.xlim(Alim_plot)
 	if Alabel is not None:
 		plt.xlabel(Alabel)
 	plt.ylabel("PMF [kT]")
@@ -1422,11 +1517,7 @@ def plotUS(ops_eq, weights, ops_ts, ops_wham, PMF, PMF_err, opLabel="Order Param
 		figLabelHist = f"{figLabelPrefix} {figLabelHist}"
 		figLabelPMF = f"{figLabelPrefix} {figLabelPMF}"
 
-	legend_labels = []
-	for i in range(nsim):
-		legend_labels.append(f"$OP={ops_eq[i]:0.{op_precision}f}$, $w={weights[i]:0.{weight_precision}f}$")
-
-	### plot a nice histogram
+	### plot nice histograms
 	if setFigSize:
 		plt.figure(figLabelHist, figsize=(10,6))
 	else:
@@ -1437,16 +1528,14 @@ def plotUS(ops_eq, weights, ops_ts, ops_wham, PMF, PMF_err, opLabel="Order Param
 	for i in range(nsim):
 		if auto_bin == True:
 			nbin = ars.optbins(ops_ts[i], 50)
-		density = gaussian_kde(ops_ts[i])
-		ops_plot = np.linspace(min(ops_ts[i]), max(ops_ts[i]), 100)
-		curve, = plt.plot(ops_plot, density(ops_plot), linewidth=2)
-		plt.hist(ops_ts[i], nbin, density=True, color=curve.get_color(), edgecolor='None', alpha=0.4)
+		label = f"$OP={ops_eq[i]:0.{op_precision}f}$, $w={weights[i]:0.{weight_precision}f}$"
+		ars.plotHist(ops_ts[i], figLabel=figLabelHist, nbin=nbin, Alim_plot=None, alpha=0.4, plotGauss=True, label=label)
 	plt.xlabel(opLabel)
 	plt.ylabel('Density')
 	if insideLegend:
-		plt.legend(legend_labels, loc='best', ncol=2, frameon=False)
+		plt.legend(loc='best')
 	else:
-		plt.legend(legend_labels, loc='center left', bbox_to_anchor=(1,0.5))
+		plt.legend(loc='center left', bbox_to_anchor=(1,0.5))
 	plt.title(titleHist)
 
 	### plot PMF
@@ -1509,7 +1598,7 @@ def plotBondWrite(bondWriteFile):
 	forces = []
 		
 	### open file, skip header
-	testFileExist(bondWriteFile,"bond write")
+	ars.checkFileExist(bondWriteFile,"bond write")
 	with open(bondWriteFile, 'r') as f:
 		for line in range(5):
 			next(f)
@@ -2024,8 +2113,8 @@ def trimUS(op, PMF, PMF_err):
 	return op_trimmed, PMF_trimmed, PMF_err_trimmed
 
 
-### test if files exist
-def testFileExist(file, name="the", required=True):
+### determine if file exists
+def checkFileExist(file, name="the", required=True):
 	if os.path.isfile(file):
 		return True
 	else:

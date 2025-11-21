@@ -7,7 +7,7 @@ function ars_refs_allFiles = findArsReferences(searchFold)
     end
 
     %%% location of arsenal folder
-    arsFold = "/Users/dduke/Files/analysis/arsenal/+ars/";
+    arsFold = "/Users/dduke/Programs/arsenal/+ars/";
 
     %%% get a list of all .m files in the arsenal folder
     arsFiles = dir(fullfile(arsFold, '*.m'));

@@ -13,6 +13,8 @@ import os
 # this script runs from the command line with four argumnets: (1) the name of
   # the trajectory file to load and center, (2) what to center, (3) whether
   # to unwrap the trajecotry, and (4) whether to color the trajectory.
+# there is also an optional fifth argument which sets the number of steps
+  # between printing progress updates (defaults to 0 for no updates).
 # the script outputs a file with the same name as the input file, modified to
   # with "_centered" at the end (but before ".dat"); for example, the input file
   # "trajectory.dat" would result in output file "trajectory_centered.dat"
@@ -21,7 +23,7 @@ import os
 
 
 ################################################################################
-### Parameters
+### Heart
 
 def main():
 
@@ -52,10 +54,10 @@ def main():
 ################################################################################
 ### File Managers
 
-### read lammps-style trajectory
+### read lammps-style atom dump
 def readAtomDump(datFile, report_every):
 	if report_every: print("Loading LAMMPS-style trajectory...")
-	testFileExist(datFile, "trajectory")
+	checkFileExist(datFile, "trajectory")
 	with open(datFile, 'r') as f:
 		content = f.readlines()
 	if report_every: print("Parsing trajectory...")
@@ -174,7 +176,7 @@ def centerPointsMolecule(points, molecules, dbox3s, center, unwrap, report_every
 	return points_centered
 
 
-### calculate center of mass, excluding dummy particle
+### calculate center of mass, excluding dummy particles
 def calcCOMnoDummy(r, dbox3):
 	if checkAllDummy(r):
 		return np.zeros(3)
@@ -193,7 +195,7 @@ def calcCOM(r, dbox3):
 
 
 ################################################################################
-### Calculations
+### Utility Functions
 
 ### apply periodic boundary condition
 def applyPBC(r, dbox):
@@ -226,8 +228,8 @@ def checkAllDummy(r):
 	return np.all(r==0)
 
 
-### test if files exist
-def testFileExist(file, name="the", required=True):
+### determine if file exists
+def checkFileExist(file, name="the", required=True):
 	if os.path.isfile(file):
 		return True
 	else:

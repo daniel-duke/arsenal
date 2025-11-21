@@ -4,7 +4,7 @@ import os
 
 ## Description
 # this script reads an oxDNA trajectory file and rewrites the data into a new
-  # file with coarsened time steps, as set by the coarse_time parameter; 
+  # file with coarsened time steps.
 # this can help reduce file sizes when the output frequency of the simulation
   # was not set appropriately, or when the simulation needed to be run for
   # longer than expected.
@@ -15,7 +15,7 @@ import os
 
 
 ################################################################################
-### Parameters
+### Heart
 
 def main():
 
@@ -28,15 +28,15 @@ def main():
 
 
 ################################################################################
-### File Parsers
+### File Managers
 
-### read oxdna trajectory
+### read oxdna trajectory, write coarsened one
 def readWriteOxDNA(datFile, coarse_time):
 	outDatFile = datFile[:-4] + "_coarse" + datFile[-4:]
 
 	### extract metadata
 	print("Getting metadata from trajectory...")
-	testFileExist(datFile,"trajectory")
+	checkFileExist(datFile, "trajectory")
 	with open(datFile, 'r') as f:
 
 		line = f.readline()
@@ -61,11 +61,12 @@ def readWriteOxDNA(datFile, coarse_time):
 				line = fin.readline()
 				if not line:
 					break
-				if line.split()[0] == 't':
+				if len(line.split()) > 1 and line.split()[0] == 't':
 					steps_recorded += 1
 					if steps_recorded % 100 == 0:
-						print("Parsed " + str(steps_recorded) + " steps")
-					if int(line.split()[2])/steps_per_record % coarse_time == 0:
+						print("parsed " + str(steps_recorded) + " steps...")
+					step = int(line.split()[2])
+					if step/steps_per_record % coarse_time == 0:
 						copy = True
 						steps_coarse += 1
 					else:
@@ -78,15 +79,15 @@ def readWriteOxDNA(datFile, coarse_time):
 	print("{:1.2e} steps recorded".format(steps_recorded))
 	print("{:1.2e} steps after coarsening".format(steps_coarse))
 
-	### all finished
+	### result
 	return
 
 
 ################################################################################
 ### Utility Functions
 
-### test if files exist
-def testFileExist(file, name="the", required=True):
+### determine if file exists
+def checkFileExist(file, name="the", required=True):
 	if os.path.isfile(file):
 		return True
 	else:
