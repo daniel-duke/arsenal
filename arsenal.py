@@ -678,7 +678,7 @@ def cleanFileContent(content):
 
 
 ### search given file for references to arsenal functions
-def findArsReferences(searchFile=sys.argv[0], display=True):
+def findArsReferences(searchFile=sys.argv[0], hush=False):
 
 	### read content of search file
 	ars.checkFileExist(searchFile, "search")
@@ -692,7 +692,7 @@ def findArsReferences(searchFile=sys.argv[0], display=True):
 		ars_refs.remove("findArsReferences")
 
 	### print the results
-	if display:
+	if not hush:
 		print("Arsenal references:")
 		for i in range(len(ars_refs)):
 			print(f"- {ars_refs[i]}")
@@ -964,7 +964,7 @@ def deployArsenal(srcFold=os.getcwd()+"/"):
 		for file in files:
 			if file.endswith(".py"):
 				srcFile = os.path.join(root, file)
-				ars_refs.extend(ars.findArsReferences(srcFile, display=False))
+				ars_refs.extend(ars.findArsReferences(srcFile, hush=True))
 
 	### write deployed arsenal file
 	deployed_functions = []
@@ -978,7 +978,7 @@ def deployArsenal(srcFold=os.getcwd()+"/"):
 
 	### check for self-references
 	while True:
-		ars_refs = ars.findArsReferences(arsDepFile, display=False)
+		ars_refs = ars.findArsReferences(arsDepFile, hush=True)
 		ars_refs = [item for item in ars_refs if item not in set(deployed_functions)]
 		if len(ars_refs) == 0:
 			break
@@ -1087,7 +1087,7 @@ def magicPlot(pubReady=False):
 
 
 ### plot the convergence of a varaible
-def plotConv(A, Alabel=None, title=None, figLabel='auto', Alim='auto', Xlim='auto', Xlabel='auto', dt_per_use='auto'):
+def plotConv(A, Alabel=None, title=None, figLabel='auto', Alim='auto', Xlim='auto', Xlabel='auto', dt_per_use='auto', **kwargs):
 
 	### additional keyword args
 	ax = None if 'ax' not in kwargs else kwargs['ax']
@@ -1125,7 +1125,7 @@ def plotConv(A, Alabel=None, title=None, figLabel='auto', Alim='auto', Xlim='aut
 	for i in range(len(A)):
 		avg[i] = np.mean(A[0:i+1])
 		if i > 0:
-			sem[i] = ars.calcSEMautocorr(A[0:i+1])
+			sem[i] = ars.calcSEMautocorr(A[0:i+1], hush=True)
 
 	### initialize figure
 	if ax is not None:
@@ -1300,6 +1300,7 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 	std_label		= 'auto'	if 'std_label' not in kwargs else kwargs['std_label']
 	std_color		= 'red'		if 'std_color' not in kwargs else kwargs['std_color']
 	ax				= None		if 'ax' not in kwargs else kwargs['ax']
+	hush			= False		if 'hush' not in kwargs else kwargs['hush']
 
 	### determine whether plotting raw data
 	plotData = plotBins or plotSteps or plotLine
@@ -1436,9 +1437,15 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 	centers = edges[:len(edges)-1] + 1/2*(edges[1]-edges[0])
 	width_bin = (Alim_bin[1]-Alim_bin[0])/nbin
 
+	### determine how much of the data is plotted
+	area_plot = sum(heights)*width_bin
+	if weights is not None:
+		area_full = sum(weights)*width_bin
+	else:
+		area_full = len(A)*width_bin
+
 	### determine density scaling
-	area = sum(heights)*width_bin
-	scale = area if useDensity else 1
+	scale = area_plot if useDensity else 1
 
 	### calculate statistics
 	if plotAvg or plotStd:
@@ -1457,10 +1464,9 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 		if assumeIID:
 			tau_int = 1
 		else:
-			Neff = int(ars.calcNeff(A))
-			tau_int = len(A)/Neff
-			if tau_int > 1:
-				print(f"Flag: Using integrated correlation time estimate {tau_int} for error bars.")
+			tau_int = 1 + 2*ars.calcCorrTime(A)
+			if not hush and tau_int > 1:
+				print(f"Using integrated correlation time estimate {tau_int:0.2f} for error bars.")
 
 	### fit parameters
 	npoint_fit = 100
@@ -1479,7 +1485,7 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 
 	### plot solid bin background
 	if (plotBins or plotSteps) and solidify:
-		plt.bar(centers, heights/scale, width_bin, color='white')	
+		plt.bar(centers, heights/scale, width_bin, color='white')
 
 	### plot data as bins
 	if plotBins:		
@@ -1526,7 +1532,7 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 	### gaussian kernel-density estimate
 	if plotGauss:
 		X = np.linspace(Alim_bin[0], Alim_bin[1], npoint_fit)
-		Y = gaussian_kde(A, weights=weights)(X)*area
+		Y = gaussian_kde(A, weights=weights)(X)*area_full
 		curve = plt.plot(X, Y/scale, color=color, linewidth=2, alpha=1)[0]
 		color = curve.get_color()
 		if gauss_color != 'match':
@@ -1544,8 +1550,7 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 			probs = weights / np.sum(weights) if weights is not None else None
 			for b in range(nbootstrap):
 				idxs = rng.choice(len(A), size=len(A), replace=True, p=probs)
-				boot[b] = gaussian_kde(A[idxs])(X)*area
-			boot *= np.sqrt(tau_int)
+				boot[b] = gaussian_kde(A[idxs])(X)*area_full
 			Y_lower = np.percentile(boot, percentile_lower, axis=0)
 			Y_upper = np.percentile(boot, percentile_upper, axis=0)
 			Y_lower = Y - (Y-Y_lower)*np.sqrt(tau_int)
@@ -1558,7 +1563,7 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 	if plotNorm:
 		mu, sigma = ars.calcNormStats(A, weights)
 		X = np.linspace(Alim_bin[0], Alim_bin[1], npoint_fit)
-		Y = norm.pdf(X, loc=mu, scale=sigma)*area
+		Y = norm.pdf(X, loc=mu, scale=sigma)*area_full
 		curve = plt.plot(X, Y/scale, color=color, linewidth=2, alpha=1)[0]
 		color = curve.get_color()
 		if norm_color != 'match':
@@ -1577,7 +1582,7 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 			for b in range(nbootstrap):
 				idxs = rng.choice(len(A), size=Neff, replace=True, p=probs)
 				mu, sigma = ars.calcNormStats(A[idxs])
-				boot[b] = norm.pdf(X, loc=mu, scale=sigma)*area
+				boot[b] = norm.pdf(X, loc=mu, scale=sigma)*area_full
 			Y_lower = np.percentile(boot, percentile_lower, axis=0)
 			Y_upper = np.percentile(boot, percentile_upper, axis=0)
 			Y_lower = Y - (Y-Y_lower)*np.sqrt(tau_int)
@@ -1591,7 +1596,7 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 		logA = np.log(A)
 		mu, sigma = ars.calcNormStats(logA, weights)
 		X = np.linspace(Alim_bin[0], Alim_bin[1], npoint_fit)
-		Y = lognorm.pdf(X, s=sigma, scale=np.exp(mu))*area
+		Y = lognorm.pdf(X, s=sigma, scale=np.exp(mu))*area_full
 		curve = plt.plot(X, Y/scale, color=color, linewidth=2, alpha=1)[0]
 		color = curve.get_color()
 		if logNorm_color != 'match':
@@ -1610,7 +1615,7 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 			for b in range(nbootstrap):
 				idxs = rng.choice(len(A), size=Neff, replace=True, p=probs)
 				mu, sigma = ars.calcNormStats(logA[idxs])
-				boot[b] = lognorm.pdf(X, s=sigma, scale=np.exp(mu))*area
+				boot[b] = lognorm.pdf(X, s=sigma, scale=np.exp(mu))*area_full
 			Y_lower = np.percentile(boot, percentile_lower, axis=0)
 			Y_upper = np.percentile(boot, percentile_upper, axis=0)
 			Y_lower = Y - (Y-Y_lower)*np.sqrt(tau_int)
@@ -1994,7 +1999,7 @@ def calcPMF(ops, weights, op_ts, tsFold, nbin, bin_padding, whamMetaFile, whamOu
 		for i in range(nsim):
 			tsFile = tsFold + f"ts_sim{i:02.0f}"
 			tau_int = 1 + 2*ars.calcCorrTime(op_ts[i])
-			f.write(tsFile + f"\t{ops[i]}\t{weights[i]}\t{tau}\n")
+			f.write(tsFile + f"\t{ops[i]}\t{weights[i]}\t{tau_int}\n")
 
 	### wham parameters (not expected to change)
 	T_wham = 300
@@ -2289,24 +2294,17 @@ def optbins(A, maxM):
 
 
 ### calculate sem using autocorrelation method
-def calcSEMautocorr(A):
+def calcSEMautocorr(A, hush=False):
 	if np.isscalar(A):
 		return 0
-	Neff = ars.calcNeff(A)
+	tau = ars.calcCorrTime(A, hush)
+	tau_int = 1 + 2*tau
+	Neff = len(A)/tau_int
 	return np.std(A) / np.sqrt(Neff)
 
 
-### calculate effective (independent) sample size
-def calcNeff(A):
-	if np.isscalar(A):
-		return 0
-	tau = ars.calcCorrTime(A)
-	tau_int = 1 + 2*tau
-	return len(A) / tau_int
-
-
 ### calculate correlation time
-def calcCorrTime(A):
+def calcCorrTime(A, hush=False):
 	acf = ars.calcAutocorr(A)
 
 	### Sokal window method
@@ -2328,20 +2326,34 @@ def calcCorrTime(A):
 		tau = 0
 
 	### check for poor estimate
-	if len(A) < 50*tau:
-		print("Warning: Correlation time estimate could be inaccurate (N < 50*tau).")
+	tau_int = 1+2*tau
+	if not hush and len(A) < 50*tau_int:
+		print("Warning: Correlation time estimate could be inaccurate.")
 	
 	### result
 	return tau
 
 
-### calculate autocorrelation function
-def calcAutocorr(A):
+### calculate autocorrelation function (slow but intuitive)
+def calcAutocorrSlow(A):
 	N = len(A)
 	Ac = A - np.mean(A)
 	acv = np.zeros(N)
 	for l in range(N):
 		acv[l] = np.dot(Ac[:N-l], Ac[l:N]) / (N-l)
+	acf = acv / acv[0]
+	return acf
+
+
+### calculate autocorrelation function (fast but unintuitive)
+def calcAutocorr(A):
+	N = len(A)
+	Ac = A - np.mean(A)
+	fft_size = 2 ** int(np.ceil(np.log2(2 * N)))
+	fft_data = np.fft.fft(Ac, n=fft_size)
+	psd = fft_data * np.conj(fft_data)
+	acv = np.fft.ifft(psd).real[:N]
+	acv /= np.arange(N, 0, -1)
 	acf = acv / acv[0]
 	return acf
 
