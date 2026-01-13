@@ -148,7 +148,7 @@ def centerPointsMolecule(points, molecules, dbox3s, center, unwrap, report_every
 		elif center == 'com_molecules' or center == 'com_clusters':
 			com = calcCOMnoDummy(molecule_coms, dbox3s[i])
 		elif isnumber(center) and int(center) <= nmolecule:
-			com = molecule_coms[int(center)-1,:]
+			com = molecule_coms[int(center)-1]
 		else:
 			print("Error: Cannot center points - center must be either 'none', 'com', 'com_molecules', or integer <= nmolecule.\n")
 			sys.exit()
@@ -213,7 +213,7 @@ def sortPointsByMolecule(points, molecules):
 	for i in range(nstep):
 		n_molecule_count = np.zeros(nmolecule, dtype=int)
 		for j in range(npoint):
-			points_moleculed[molecules[j]-1][i,n_molecule_count[molecules[j]-1],:] = points[i,j,:]
+			points_moleculed[molecules[j]-1][i,n_molecule_count[molecules[j]-1]] = points[i,j]
 			n_molecule_count[molecules[j]-1] += 1
 	return points_moleculed
 

@@ -2,9 +2,11 @@ import arsenal as ars
 import numpy as np
 import math
 import matplotlib.pyplot as plt
+from scipy.stats import linregress
 from scipy.stats import gaussian_kde
+from scipy.stats import norm
+from scipy.stats import lognorm
 from scipy.special import gammaln
-from scipy import stats
 import subprocess
 import shutil
 import pickle
@@ -17,6 +19,9 @@ import ast
 # Welcome! You have stumbled upon my humble arsenal of python functions for
   # analyzing simulations relevant to DNA origami, from oxDNA to DNAfold to
   # mesoscopic LAMMPS models. Enjoy!
+
+## Notes
+# For all plotting functions, 
 
 ## Terminology
 # bais - 2D python array containing lists of base indices (starting from 0)
@@ -277,7 +282,7 @@ def readAtomDump(datFile, nstep_skip=0, coarse_time=1, bdis='all', coarse_points
 		if not ignorePBC:
 			points[i] = ars.applyPBC(points[i], dbox3s[i])
 		if (i+1)%report_every == 0:
-			print(f"Processed {i+1} steps...")
+			print(f"processed {i+1} steps...")
 
 	### results
 	output = [ points, col2s ]
@@ -872,7 +877,7 @@ def writeGeo(geoFile, dbox3, r, molecules='auto', types='auto', bonds=None, angl
 			for i in range(natom):
 				f.write(f"\t{i+1:<{len_natom}}")
 				for j in range(nextra):
-					f.write(f" {extras[i][j]:>{len_extra[j]+e_precision+1}.{e_precision}f}")
+					f.write(f" {extras[i][j]:>{len_extra[j]+e_precision+2}.{e_precision}f}")
 				f.write("\n")
 
 
@@ -1052,7 +1057,9 @@ def magicPlot(pubReady=False):
 		'xtick.labelsize'	: 14,
 		'ytick.labelsize'	: 14,
 		'axes.labelsize'	: 14,
-		'axes.titlesize'	: 16
+		'axes.titlesize'	: 16,
+		'axes.axisbelow'	: True,
+		'grid.color'		: (0.5, 0.5, 0.5, 0.3)
 	}
 	plt.rcParams.update(params)
 
@@ -1067,7 +1074,9 @@ def magicPlot(pubReady=False):
 		'xtick.labelsize'	: 20,
 		'ytick.labelsize'	: 20,
 		'axes.labelsize'	: 20,
-		'axes.titlesize'	: 24
+		'axes.titlesize'	: 24,
+		'axes.axisbelow'	: True,
+		'grid.color'		: (0.5, 0.5, 0.5, 0.3)
 	}
 
 	if not pubReady:
@@ -1078,7 +1087,10 @@ def magicPlot(pubReady=False):
 
 
 ### plot the convergence of a varaible
-def plotConv(A, Alabel=None, title=None, figLabel="Conv", Alim='auto', Xlim='auto', Xlabel='auto', dt_per_use='auto'):
+def plotConv(A, Alabel=None, title=None, figLabel='auto', Alim='auto', Xlim='auto', Xlabel='auto', dt_per_use='auto'):
+
+	### additional keyword args
+	ax = None if 'ax' not in kwargs else kwargs['ax']
 
 	### interpret input
 	if isinstance(Alim, str) and Alim == 'auto':
@@ -1100,6 +1112,12 @@ def plotConv(A, Alabel=None, title=None, figLabel="Conv", Alim='auto', Xlim='aut
 	else:
 		print("Flag: Skipping convergence plot - time step must be either 'auto' or number.")
 		return
+	if ax is not None:
+		if figLabel != 'auto' and figLabel is not None:
+			print("Warining: Unused figure label input.")
+			figLabel = None
+	elif figLabel == 'auto':
+		figLabel = "Conv"
 
 	### calculate mean and sem
 	avg = np.zeros(len(A))
@@ -1109,11 +1127,16 @@ def plotConv(A, Alabel=None, title=None, figLabel="Conv", Alim='auto', Xlim='aut
 		if i > 0:
 			sem[i] = ars.calcSEMautocorr(A[0:i+1])
 
+	### initialize figure
+	if ax is not None:
+		plt.sca(ax)
+	else:
+		plt.figure(figLabel)
+
 	### plot data, mean, sem
-	plt.figure(figLabel)
 	plt.scatter(time, A, color='green')
 	plt.plot(time, avg, color='purple')
-	plt.fill_between(time, avg+sem, avg-sem, color='purple', alpha=0.3)
+	plt.fill_between(time, avg+sem, avg-sem, color='purple', alpha=0.3, linewidth=0)
 	plt.xlim(Xlim)
 	plt.ylim(Alim)
 	if Xlabel == 'auto':
@@ -1145,9 +1168,21 @@ def plotPoints(X, Y, title=None, figLabel="Points", Xlim='auto', Ylim='auto', Xl
 	ecolor		= None		if 'ecolor' not in kwargs else kwargs['ecolor']
 	ecapsize	= None		if 'ecapsize' not in kwargs else kwargs['ecapsize']
 	elinewidth	= None		if 'elinewidth' not in kwargs else kwargs['elinewidth']
+	ax			= None		if 'ax' not in kwargs else kwargs['ax']
 
-	### create figure
-	plt.figure(figLabel)
+	### interpret input
+	if ax is not None:
+		if figLabel != 'auto' and figLabel is not None:
+			print("Warining: Unused figure label input.")
+			figLabel = None
+	elif figLabel == 'auto':
+		figLabel = "Points"
+
+	### initialize figure
+	if ax is not None:
+		plt.sca(ax)
+	else:
+		plt.figure(figLabel)
 
 	### adjust markersize for scatter
 	if S is not None:
@@ -1174,7 +1209,7 @@ def plotPoints(X, Y, title=None, figLabel="Points", Xlim='auto', Ylim='auto', Xl
 
 
 ### plot a nice line
-def plotLine(X, Y, title=None, figLabel="Line", Xlim='auto', Ylim='auto', Xlabel=None, Ylabel=None, **kwargs):
+def plotLine(X, Y, title=None, figLabel='auto', Xlim='auto', Ylim='auto', Xlabel=None, Ylabel=None, **kwargs):
 
 	### additional keyword args
 	color		= None		if 'color' not in kwargs else kwargs['color']
@@ -1189,12 +1224,23 @@ def plotLine(X, Y, title=None, figLabel="Line", Xlim='auto', Ylim='auto', Xlabel
 	ecapsize	= None		if 'ecapsize' not in kwargs else kwargs['ecapsize']
 	elinewidth	= None		if 'elinewidth' not in kwargs else kwargs['elinewidth']
 	label		= None		if 'label' not in kwargs else kwargs['label']
+	ax			= None		if 'ax' not in kwargs else kwargs['ax']
 
-	### create figure
-	plt.figure(figLabel)
+	### interpret input
+	if ax is not None:
+		if figLabel != 'auto' and figLabel is not None:
+			print("Warining: Unused figure label input.")
+			figLabel = None
+	elif figLabel == 'auto':
+		figLabel = "Line"
+
+	### initialize figure
+	if ax is not None:
+		plt.sca(ax)
+	else:
+		plt.figure(figLabel)
 	
 	### plot errorbars
-	plt.figure(figLabel)
 	if E is not None:
 		plt.errorbar(X, Y, E, fmt='none', ecolor=ecolor, capsize=ecapsize, linewidth=elinewidth, capthick=elinewidth)
 
@@ -1215,16 +1261,35 @@ def plotLine(X, Y, title=None, figLabel="Line", Xlim='auto', Ylim='auto', Xlabel
 
 
 ### plot a nice histogram
-def plotHist(A, Alabel=None, title=None, figLabel="Hist", nbin='auto', Alim_bin='auto', Alim_plot='auto', Ylabel='auto', useDensity=False, **kwargs):
+def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin='auto', Alim_plot='auto', Ylabel='auto', useDensity=False, rng=np.random, **kwargs):
 
 	### additional keyword args
 	weights			= None		if 'weights' not in kwargs else kwargs['weights']
+	assumeIID		= False		if 'assumeIID' not in kwargs else kwargs['assumeIID']
 	plotBins		= True		if 'plotBins' not in kwargs else kwargs['plotBins']
+	plotSteps		= False		if 'plotSteps' not in kwargs else kwargs['plotSteps']
 	plotLine		= False		if 'plotLine' not in kwargs else kwargs['plotLine']
 	plotGauss		= False		if 'plotGauss' not in kwargs else kwargs['plotGauss']
+	plotNorm		= False		if 'plotNorm' not in kwargs else kwargs['plotNorm']
+	plotLogNorm		= False		if 'plotLogNorm' not in kwargs else kwargs['plotLogNorm']
 	color			= None		if 'color' not in kwargs else kwargs['color']
+	edgecolor		= 'auto'	if 'edgecolor' not in kwargs else kwargs['edgecolor']
 	alpha			= 0.6		if 'alpha' not in kwargs else kwargs['alpha']
+	solidify		= False		if 'solidify' not in kwargs else kwargs['solidify']
 	label			= None		if 'label' not in kwargs else kwargs['label']
+	gauss_label		= 'auto'	if 'gauss_label' not in kwargs else kwargs['gauss_label']
+	gauss_color		= 'match'	if 'gauss_color' not in kwargs else kwargs['gauss_color']
+	norm_label		= 'auto'	if 'norm_label' not in kwargs else kwargs['norm_label']
+	norm_color		= 'match'	if 'norm_color' not in kwargs else kwargs['norm_color']
+	logNorm_label	= 'auto'	if 'logNorm_label' not in kwargs else kwargs['logNorm_label']
+	logNorm_color	= 'match'	if 'logNorm_color' not in kwargs else kwargs['logNorm_color']
+	plotErrSR		= False		if 'plotErrSR' not in kwargs else kwargs['plotErrSR']
+	plotErrBS		= False		if 'plotErrBS' not in kwargs else kwargs['plotErrBS']
+	plotGaussErr	= False		if 'plotGaussErr' not in kwargs else kwargs['plotGaussErr']
+	plotNormErr		= False		if 'plotNormErr' not in kwargs else kwargs['plotNormErr']
+	plotLogNormErr	= False		if 'plotLogNormErr' not in kwargs else kwargs['plotLogNormErr']
+	sigma_ci		= 1			if 'sigma_ci' not in kwargs else kwargs['sigma_ci']
+	ecolor			= 'auto'	if 'ecolor' not in kwargs else kwargs['ecolor']
 	plotAvg			= False		if 'plotAvg' not in kwargs else kwargs['plotAvg']
 	plotMed			= False		if 'plotMed' not in kwargs else kwargs['plotMed']
 	plotStd			= False		if 'plotStd' not in kwargs else kwargs['plotStd']
@@ -1234,16 +1299,38 @@ def plotHist(A, Alabel=None, title=None, figLabel="Hist", nbin='auto', Alim_bin=
 	med_color		= 'red'		if 'med_color' not in kwargs else kwargs['med_color']
 	std_label		= 'auto'	if 'std_label' not in kwargs else kwargs['std_label']
 	std_color		= 'red'		if 'std_color' not in kwargs else kwargs['std_color']
+	ax				= None		if 'ax' not in kwargs else kwargs['ax']
 
-	### ensure valid plot type combination
-	if not plotBins and not plotLine and not plotGauss:
-		print("Flag: Skipping histogram plot - at least one plot type (bins, line, gauss) must be true.")
-		return
-	if plotLine and plotGauss:
-		print("Flag: Skipping histogram plot - cannot plot both line and gauss.")
-		return
+	### determine whether plotting raw data
+	plotData = plotBins or plotSteps or plotLine
 
-	### interpret binning input
+	### ensure valid input
+	if not (plotBins or plotSteps or plotLine or plotGauss or plotNorm or plotLogNorm):
+		print("Flag: Skipping histogram plot - at least one plot type (bins, steps, line, gauss, normal, log normal) must be true.")
+		return
+	if weights is not None and any(weights<0):
+		print("Warning: Skipping histogram plot - weights must be non-negative.")
+		return
+	if sigma_ci <= 0:
+		print("Flag: Skipping histogram plot - confidence interval sigma must be positive.")
+		return
+	if (plotErrSR or plotErrBS) and not plotData:
+		print("Flag: Removing histogram error bars - at least one data plot (bins, steps, line) must be true to plot error bars.")
+		plotErrSR, plotErrBS = False, False
+	if plotLogNorm and any(A<=0):
+		print("Flag: Removing histogram log normal fit - data must be positive.")
+		plotLogNorm = False
+	if plotGaussErr and not plotGauss:
+		print("Flag: Removing histogram Gaussian KDE error bars - cannot plot error bars without plotting fit.")
+		plotGaussErr = False
+	if plotNormErr and not plotNorm:
+		print("Flag: Removing histogram normal fit error bars - cannot plot error bars without plotting fit.")
+		plotNormErr = False
+	if plotLogNormErr and not plotLogNorm:
+		print("Flag: Removing histogram log normal error bars - cannot plot error bars without plotting fit.")
+		plotLogNormErr = False
+
+	### interpret input
 	if isinstance(nbin, str) and nbin == 'auto':
 		nbin = ars.optbins(A, 50)
 	elif not ars.isinteger(nbin):
@@ -1264,6 +1351,61 @@ def plotHist(A, Alabel=None, title=None, figLabel="Hist", nbin='auto', Alim_bin=
 		if Alim_plot is not None:
 			print("Flag: Skipping histogram plot - variable limits must be None, 'auto', or 2-element array.")
 			return
+	if isinstance(edgecolor, str) and edgecolor == 'auto':
+		edgecolor = 'black'
+		if plotSteps or plotLine or plotGauss or plotNorm or plotLogNorm:
+			edgecolor = None
+	if isinstance(ecolor, str) and ecolor == 'auto':
+		ecolor = edgecolor if edgecolor is not None else color
+	if ax is not None:
+		if figLabel != 'auto' and figLabel is not None:
+			print("Flag: Unused figure label input.")
+			figLabel = None
+	elif figLabel == 'auto':
+		figLabel = "Hist"
+
+	### check for unused labels
+	if not plotGauss:
+		if not (gauss_label is None or gauss_label == 'auto'):
+			print("Flag: Unused label input for Gaussian KDE.")
+		gauss_label = None
+	if not plotNorm:
+		if not (norm_label is None or norm_label == 'auto'):
+			print("Flag: Unused label input for normal fit.")
+		norm_label = None
+	if not plotLogNorm:
+		if not (logNorm_label is None or logNorm_label == 'auto'):
+			print("Flag: Unused label input for log normal fit.")
+		logNorm_label = None
+	if not plotAvg:
+		if not (avg_label is None or avg_label == 'auto'):
+			print("Flag: Unused label input for average line.")
+		avg_label = None
+	if not plotMed:
+		if not (med_label is None or med_label == 'auto'):
+			print("Flag: Unused label input for median line.")
+		med_label = None
+	if not plotStd:
+		if not (std_label is None or std_label == 'auto'):
+			print("Flag: Unused label input for standard deviation lines.")
+		std_label = None
+
+	### interpret fit labels
+	if gauss_label == 'auto':
+		if label is not None:
+			gauss_label = None if plotData else 'match'
+		else:
+			gauss_label = "Gaussian KDE" if plotData else None
+	if norm_label == 'auto':
+		if label is not None:
+			norm_label = None if plotData else 'match'
+		else:
+			norm_label = "Normal Fit" if plotData else None
+	if logNorm_label == 'auto':
+		if label is not None:
+			logNorm_label = None if plotData else 'match'
+		else:
+			logNorm_label = "Log Normal Fit" if plotData else None
 
 	### interpret line labels
 	if avg_label == 'auto':
@@ -1279,6 +1421,25 @@ def plotHist(A, Alabel=None, title=None, figLabel="Hist", nbin='auto', Alim_bin=
 	elif std_label is not None:
 		std_label = "$\\sigma_{\\textrm{" + f"{std_label}" + "}}$"
 
+	### determine whether plotting legend
+	legend = False
+	if label or gauss_label or norm_label or logNorm_label or avg_label or med_label or std_label:
+		legend = True
+
+	### numpify data
+	A = np.asarray(A)
+	if weights is not None:
+		weights = np.asarray(weights)
+
+	### calculate histogram
+	heights, edges = np.histogram(A, nbin, weights=weights, range=Alim_bin)
+	centers = edges[:len(edges)-1] + 1/2*(edges[1]-edges[0])
+	width_bin = (Alim_bin[1]-Alim_bin[0])/nbin
+
+	### determine density scaling
+	area = sum(heights)*width_bin
+	scale = area if useDensity else 1
+
 	### calculate statistics
 	if plotAvg or plotStd:
 		avg = np.mean(A)
@@ -1287,43 +1448,180 @@ def plotHist(A, Alabel=None, title=None, figLabel="Hist", nbin='auto', Alim_bin=
 	if plotStd:
 		std = np.std(A)
 
-	### plot histogram bins
-	plt.figure(figLabel)
-	if plotBins:
-		patches = plt.hist(A, nbin, weights=weights, range=Alim_bin, density=useDensity, color=color, alpha=alpha)[2]
-		if not plotLine and not plotGauss:
-			plt.hist(A, nbin, weights=weights, range=Alim_bin, density=useDensity, facecolor='none', edgecolor='black')
-		if label is not None:
-			patches[0].set_label(label)
-		color = patches[0].get_facecolor()
+	### assume weighted data is uncorrelated
+	if weights is not None:
+		assumeIID = True
 
-	### plot histogram as line
+	### calculate number of independent data points
+	if plotErrSR or plotErrBS or plotGaussErr or plotNormErr or plotLogNormErr:
+		if assumeIID:
+			tau_int = 1
+		else:
+			Neff = int(ars.calcNeff(A))
+			tau_int = len(A)/Neff
+			if tau_int > 1:
+				print(f"Flag: Using integrated correlation time estimate {tau_int} for error bars.")
+
+	### fit parameters
+	npoint_fit = 100
+	nbootstrap = 1000
+	percentile_lower = norm.cdf(-sigma_ci)*100
+	percentile_upper = norm.cdf(sigma_ci)*100
+
+	### initialize figure
+	if ax is not None:
+		plt.sca(ax)
+	else:
+		plt.figure(figLabel)
+
+	### initialize label flag
+	isDataLabeled = True if label is None else False
+
+	### plot solid bin background
+	if (plotBins or plotSteps) and solidify:
+		plt.bar(centers, heights/scale, width_bin, color='white')	
+
+	### plot data as bins
+	if plotBins:		
+		bars = plt.bar(centers, heights/scale, width_bin, color=color, alpha=alpha, edgecolor=edgecolor)
+		color = bars[0].get_facecolor()
+		if not isDataLabeled:
+			bars[0].set_label(label)
+			isDataLabeled = True
+
+	### plot data as steps
+	if plotSteps:
+		bars = plt.hist(A, nbin, weights=weights, range=Alim_bin, color=color, linewidth=2, histtype='step')[2]
+		color = bars[0].get_edgecolor()
+		if not isDataLabeled:
+			bars[0].set_label(label)
+			isDataLabeled = True
+
+	### plot data as line
 	if plotLine:
-		heights, edges = np.histogram(A, nbin, weights=weights, range=Alim_bin, density=useDensity)
-		edges = edges[:len(edges)-1] + 1/2*(edges[1]-edges[0])
-		curve = plt.plot(edges, heights, color=color, linewidth=2, alpha=1)[0]
-		if not plotBins:
-			color = curve.get_color()
-			if label is not None:
-				curve.set_label(label)
+		line = plt.plot(centers, heights, color=color, linewidth=2)[0]
+		color = line.get_color()
+		if not isDataLabeled:
+			line.set_label(label)
+			isDataLabeled = True
 
-	### plot histogram as gaussian kernel-density estimate
+	### square root error bars on data
+	if plotErrSR:
+		Y_err = np.sqrt(tau_int*heights)
+		plt.errorbar(centers, heights/scale, Y_err/scale, fmt='none', linewidth=1, color=ecolor, alpha=alpha)
+
+	### bootstrap error bars on data
+	if plotErrBS:
+		boot = np.zeros((nbootstrap, nbin))
+		probs = weights / np.sum(weights) if weights is not None else None
+		for b in range(nbootstrap):
+			idxs = rng.choice(len(A), size=len(A), replace=True, p=probs)
+			boot[b] = np.histogram(A[idxs], nbin, range=Alim_bin)[0]
+		heights_lower = np.percentile(boot, percentile_lower, axis=0)
+		heights_upper = np.percentile(boot, percentile_upper, axis=0)
+		heights_err = np.vstack((heights-heights_lower, heights_upper-heights))
+		heights_err *= np.sqrt(tau_int)
+		plt.errorbar(centers, heights/scale, heights_err/scale, fmt='none', linewidth=1, color=ecolor, alpha=alpha)
+
+	### gaussian kernel-density estimate
 	if plotGauss:
-		pdf = gaussian_kde(A, weights=weights)
-		X = np.linspace(Alim_bin[0], Alim_bin[1], 100)
-		Y = pdf(X)
-		if not useDensity:
-			dA_bin = (Alim_bin[1]-Alim_bin[0])/nbin
-			Y *= len(A)*dA_bin
-		curve = plt.plot(X, Y, color=color, linewidth=2, alpha=1)[0]
-		if not plotBins:
-			color_data = curve.get_color()
-			if label is not None:
+		X = np.linspace(Alim_bin[0], Alim_bin[1], npoint_fit)
+		Y = gaussian_kde(A, weights=weights)(X)*area
+		curve = plt.plot(X, Y/scale, color=color, linewidth=2, alpha=1)[0]
+		color = curve.get_color()
+		if gauss_color != 'match':
+			curve.set_color(gauss_color)
+		if gauss_label == 'match':
+			if not isDataLabeled:
 				curve.set_label(label)
+				isDataLabeled = True
+		elif gauss_label is not None:
+			curve.set_label(gauss_label)
 
-	### plot average line
+		### gaussian KDE error
+		if plotGaussErr:
+			boot = np.zeros((nbootstrap, npoint_fit))
+			probs = weights / np.sum(weights) if weights is not None else None
+			for b in range(nbootstrap):
+				idxs = rng.choice(len(A), size=len(A), replace=True, p=probs)
+				boot[b] = gaussian_kde(A[idxs])(X)*area
+			boot *= np.sqrt(tau_int)
+			Y_lower = np.percentile(boot, percentile_lower, axis=0)
+			Y_upper = np.percentile(boot, percentile_upper, axis=0)
+			Y_lower = Y - (Y-Y_lower)*np.sqrt(tau_int)
+			Y_upper = Y + (Y_upper-Y)*np.sqrt(tau_int)
+			patch = plt.fill_between(X, Y_lower/scale, Y_upper/scale, color=color, alpha=0.2, linewidth=0)
+			if gauss_color != 'match':
+				patch.set_color(gauss_color)
+
+	### normal fit
+	if plotNorm:
+		mu, sigma = ars.calcNormStats(A, weights)
+		X = np.linspace(Alim_bin[0], Alim_bin[1], npoint_fit)
+		Y = norm.pdf(X, loc=mu, scale=sigma)*area
+		curve = plt.plot(X, Y/scale, color=color, linewidth=2, alpha=1)[0]
+		color = curve.get_color()
+		if norm_color != 'match':
+			curve.set_color(norm_color)
+		if norm_label == 'match':
+			if not isDataLabeled:
+				curve.set_label(label)
+				isDataLabeled = True
+		elif norm_label is not None:
+			curve.set_label(norm_label)
+
+		### normal fit error
+		if plotNormErr:
+			probs = weights / np.sum(weights) if weights is not None else None
+			boot = np.zeros((nbootstrap, npoint_fit))
+			for b in range(nbootstrap):
+				idxs = rng.choice(len(A), size=Neff, replace=True, p=probs)
+				mu, sigma = ars.calcNormStats(A[idxs])
+				boot[b] = norm.pdf(X, loc=mu, scale=sigma)*area
+			Y_lower = np.percentile(boot, percentile_lower, axis=0)
+			Y_upper = np.percentile(boot, percentile_upper, axis=0)
+			Y_lower = Y - (Y-Y_lower)*np.sqrt(tau_int)
+			Y_upper = Y + (Y_upper-Y)*np.sqrt(tau_int)
+			patch = plt.fill_between(X, Y_lower/scale, Y_upper/scale, color=color, alpha=0.2, linewidth=0)
+			if norm_color != 'match':
+				patch.set_color(norm_color)
+
+	### log normal fit
+	if plotLogNorm:
+		logA = np.log(A)
+		mu, sigma = ars.calcNormStats(logA, weights)
+		X = np.linspace(Alim_bin[0], Alim_bin[1], npoint_fit)
+		Y = lognorm.pdf(X, s=sigma, scale=np.exp(mu))*area
+		curve = plt.plot(X, Y/scale, color=color, linewidth=2, alpha=1)[0]
+		color = curve.get_color()
+		if logNorm_color != 'match':
+			curve.set_color(logNorm_color)
+		if logNorm_label == 'match':
+			if not isDataLabeled:
+				curve.set_label(label)
+				isDataLabeled = True
+		elif logNorm_label is not None:
+			curve.set_label(logNorm_label)
+
+		### log normal fit error
+		if plotLogNormErr:
+			probs = weights / np.sum(weights) if weights is not None else None
+			boot = np.zeros((nbootstrap, npoint_fit))
+			for b in range(nbootstrap):
+				idxs = rng.choice(len(A), size=Neff, replace=True, p=probs)
+				mu, sigma = ars.calcNormStats(logA[idxs])
+				boot[b] = lognorm.pdf(X, s=sigma, scale=np.exp(mu))*area
+			Y_lower = np.percentile(boot, percentile_lower, axis=0)
+			Y_upper = np.percentile(boot, percentile_upper, axis=0)
+			Y_lower = Y - (Y-Y_lower)*np.sqrt(tau_int)
+			Y_upper = Y + (Y_upper-Y)*np.sqrt(tau_int)
+			patch = plt.fill_between(X, Y_lower/scale, Y_upper/scale, color=color, alpha=0.2, linewidth=0)
+			if logNorm_color != 'match':
+				patch.set_color(logNorm_color)
+
+	### average line
 	if plotAvg:
-		line = plt.axvline(avg, linestyle='--', linewidth=2, alpha=1)
+		line = plt.axvline(avg, linestyle='--', linewidth=2)
 		if avg_color == 'match':
 			line.set_color(color)
 		else:
@@ -1331,9 +1629,9 @@ def plotHist(A, Alabel=None, title=None, figLabel="Hist", nbin='auto', Alim_bin=
 		if avg_label is not None:
 			line.set_label(f"{avg_label} = {avg:0.2f}")
 
-	### plot median line
+	### median line
 	if plotMed:
-		line = plt.axvline(med, linestyle='-.', linewidth=2, alpha=1)
+		line = plt.axvline(med, linestyle='-.', linewidth=2)
 		if med_color == 'match':
 			line.set_color(color)
 		else:
@@ -1341,9 +1639,9 @@ def plotHist(A, Alabel=None, title=None, figLabel="Hist", nbin='auto', Alim_bin=
 		if med_label is not None:
 			line.set_label(f"{med_label} = {med:0.2f}")
 
-	### plot standard deviation lines
+	### standard deviation lines
 	if plotStd:
-		line = plt.axvline(avg+std, linestyle=':', linewidth=2, alpha=1)
+		line = plt.axvline(avg+std, linestyle=':', linewidth=2)
 		if std_color == 'match':
 			line.set_color(color)
 		else:
@@ -1371,12 +1669,15 @@ def plotHist(A, Alabel=None, title=None, figLabel="Hist", nbin='auto', Alim_bin=
 		plt.ylabel(Ylabel)
 	if title is not None:
 		plt.title(title)
-	if label or (plotAvg and avg_label is not None) or (plotMed and med_label is not None) or (plotStd and std_label is not None):
+	if legend:
 		plt.legend()
 
 
 ### plot a nice 2D histogram
-def plotHist2D(A, B, Alabel=None, Blabel=None, title=None, figLabel="Hist", nbin='auto', Alim_bin='auto', Blim_bin='auto', Alim_plot='auto', Blim_plot='auto', useDensity=False):
+def plotHist2D(A, B, Alabel=None, Blabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin='auto', Blim_bin='auto', Alim_plot='auto', Blim_plot='auto', useDensity=False, **kwargs):
+
+	### additional keyword args
+	ax = None if 'ax' not in kwargs else kwargs['ax']
 
 	### interpret input
 	if isinstance(nbin, str) and nbin == 'auto':
@@ -1408,9 +1709,20 @@ def plotHist2D(A, B, Alabel=None, Blabel=None, title=None, figLabel="Hist", nbin
 		if Blim_plot is not None:
 			print("Flag: Skipping histogram plot - variable limits must be None, 'auto', or 2-element array.")
 			return
+	if ax is not None:
+		if figLabel != 'auto' and figLabel is not None:
+			print("Warining: Unused figure label input.")
+			figLabel = None
+	elif figLabel == 'auto':
+		figLabel = "Hist2D"
+
+	### initialize figure
+	if ax is not None:
+		plt.sca(ax)
+	else:
+		plt.figure(figLabel)
 
 	### plot histogram
-	plt.figure(figLabel)
 	plt.hist2d(A, B, nbin, range=[Alim_bin,Blim_bin], density=useDensity)
 	if Alim_plot is not None:
 		plt.xlim(Alim_plot)
@@ -1425,11 +1737,12 @@ def plotHist2D(A, B, Alabel=None, Blabel=None, title=None, figLabel="Hist", nbin
 
 
 ### calculate and plot PMF from histogram
-def plotPMF(A, Alabel=None, title=None, figLabel="PMF", nbin='auto', Alim_bin='auto', Alim_plot='auto', **kwargs):
+def plotPMF(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin='auto', Alim_plot='auto', **kwargs):
 
 	### additional keyword args
-	zero	= 'min'			if 'zero' not in kwargs else kwargs['zero']
-	color	= 'purple'		if 'color' not in kwargs else kwargs['color']
+	zero	= 'min'		if 'zero' not in kwargs else kwargs['zero']
+	color	= 'purple'	if 'color' not in kwargs else kwargs['color']
+	ax		= None		if 'ax' not in kwargs else kwargs['ax']
 
 	### interpret input
 	if isinstance(nbin, str) and nbin == 'auto':
@@ -1452,6 +1765,12 @@ def plotPMF(A, Alabel=None, title=None, figLabel="PMF", nbin='auto', Alim_bin='a
 	if zero != 'min' and zero != 'max':
 		print("Error: Cannot calculate PMF - zero must be either 'min' or 'max'.\n")
 		sys.exit()
+	if ax is not None:
+		if figLabel != 'auto' and figLabel is not None:
+			print("Warining: Unused figure label input.")
+			figLabel = None
+	elif figLabel == 'auto':
+		figLabel = "PMF"
 
 	### calcualte PMF
 	counts, bin_edges = np.histogram(A, nbin, range=Alim_bin)
@@ -1466,8 +1785,13 @@ def plotPMF(A, Alabel=None, title=None, figLabel="PMF", nbin='auto', Alim_bin='a
 	elif zero == 'max':
 		PMF -= np.nanmax(PMF)
 
+	### initialize figure
+	if ax is not None:
+		plt.sca(ax)
+	else:
+		plt.figure(figLabel)
+
 	### plot PMF
-	plt.figure(figLabel)
 	plt.plot(bins, PMF, '-o', color=color)
 	if Alim_plot is not None:
 		plt.xlim(Alim_plot)
@@ -1487,7 +1811,7 @@ def plotUS(ops_eq, weights, ops_ts, ops_wham, PMF, PMF_err, opLabel="Order Param
 	op_precision		= 1			if 'op_precision' not in kwargs else kwargs['op_precision']
 	weight_precision	= 1			if 'weight_precision' not in kwargs else kwargs['weight_precision']
 	useOxUnits			= False		if 'useOxUnits' not in kwargs else kwargs['useOxUnits']
-	setFigSize			= True		if 'setFigSize' not in kwargs else kwargs['setFigSize'] 
+	setFigSize			= True		if 'setFigSize' not in kwargs else kwargs['setFigSize']
 
 	### interpret input
 	auto_bin = False
@@ -1555,6 +1879,14 @@ def plotUS(ops_eq, weights, ops_ts, ops_wham, PMF, PMF_err, opLabel="Order Param
 ### calculate and plot mean squared displacement
 def plotMSD(points, dbox3, dt_per_use, xLabel=None, yLabel=None, title=None, figLabel="MSD", nbin=10):
 
+	### define center of mass function
+	if len(points.shape) == 2:
+		def getCOM(point):
+			return point
+	elif len(points.shape) == 3:
+		def getCOM(points):
+			return np.mean(points, axis=0)
+
 	### calculate MSD
 	nstep = int(points.shape[0])
 	nstep_bin = int(np.floor(nstep/nbin))
@@ -1564,16 +1896,16 @@ def plotMSD(points, dbox3, dt_per_use, xLabel=None, yLabel=None, title=None, fig
 	time = np.linspace(0, (nstep_bin-1)*dt_per_use, nstep_bin)
 	dis2 = np.zeros((nstep_bin, nbin))
 	for q in range(nbin):
-		com0 = np.mean(points[q*nstep_bin,:,:], axis=0)
+		com0 = getCOM(points[q*nstep_bin])
 		com_prev = com0
 		pbc = np.zeros(3)
 		for i in range(1, nstep_bin):
-			com = np.mean(points[q*nstep_bin+i,:,:], axis=0)
+			com = getCOM(points[q*nstep_bin+i])
 			pbc += np.round((com - com_prev) / dbox3).astype(int)
 			dis2[i,q] += np.sum((com - pbc*dbox3 - com0)**2)
 			com_prev = com
 	MSD = np.mean(dis2, axis=1)
-	slope = stats.linregress(time, MSD)[0]
+	slope = linregress(time, MSD)[0]
 	D = slope/6
 
 	### plot MSD
@@ -1661,7 +1993,7 @@ def calcPMF(ops, weights, op_ts, tsFold, nbin, bin_padding, whamMetaFile, whamOu
 	with open(whamMetaFile, 'w') as f:
 		for i in range(nsim):
 			tsFile = tsFold + f"ts_sim{i:02.0f}"
-			tau = max([1,ars.calcCorrTime(op_ts[i])])
+			tau_int = 1 + 2*ars.calcCorrTime(op_ts[i])
 			f.write(tsFile + f"\t{ops[i]}\t{weights[i]}\t{tau}\n")
 
 	### wham parameters (not expected to change)
@@ -1733,7 +2065,7 @@ def centerPointsMolecule(points, molecules, dbox3s, center=1, unwrap=True, repor
 		elif center == 'com_molecules' or center == 'com_clusters':
 			com = ars.calcCOMnoDummy(molecule_coms, dbox3s[i])
 		elif ars.isinteger(center) and center <= nmolecule:
-			com = molecule_coms[center-1,:]
+			com = molecule_coms[center-1]
 		else:
 			print("Error: Cannot center points - center must be either 'none', 'com', 'com_molecules', or integer <= nmolecule.\n")
 			sys.exit()
@@ -1960,30 +2292,56 @@ def optbins(A, maxM):
 def calcSEMautocorr(A):
 	if np.isscalar(A):
 		return 0
+	Neff = ars.calcNeff(A)
+	return np.std(A) / np.sqrt(Neff)
+
+
+### calculate effective (independent) sample size
+def calcNeff(A):
+	if np.isscalar(A):
+		return 0
 	tau = ars.calcCorrTime(A)
-	Nind = len(A) / (1 + 2 * tau)
-	return np.std(A) / np.sqrt(Nind)
+	tau_int = 1 + 2*tau
+	return len(A) / tau_int
 
 
 ### calculate correlation time
-def calcCorrTime(A, acf_cut=0.05):
+def calcCorrTime(A):
 	acf = ars.calcAutocorr(A)
-	for t_max in range(len(A)):
-		if acf[t_max] < acf_cut:
+
+	### Sokal window method
+	M = 5
+	tau = None
+	tau_cumsum = np.cumsum(acf[1:])	
+	for i, tau_est in enumerate(tau_cumsum):
+		if i + 1 >= M * tau_est:
+			tau = tau_est
 			break
-	tau = acf[0]/2 + np.sum(acf[1:t_max]) + acf[t_max]/2
+
+	### check for unconverged correlation
+	if tau == None:
+		print("Error: Correlation time estimate did not converge.")
+		sys.exit()
+
+	### check for uncorrelated data
 	if tau < 1:
 		tau = 0
+
+	### check for poor estimate
+	if len(A) < 50*tau:
+		print("Warning: Correlation time estimate could be inaccurate (N < 50*tau).")
+	
+	### result
 	return tau
 
 
 ### calculate autocorrelation function
 def calcAutocorr(A):
 	N = len(A)
-	avg = np.mean(A)
+	Ac = A - np.mean(A)
 	acv = np.zeros(N)
 	for l in range(N):
-		acv[l] = np.sum((A[:N-l] - avg) * (A[l:N] - avg)) / N
+		acv[l] = np.dot(Ac[:N-l], Ac[l:N]) / (N-l)
 	acf = acv / acv[0]
 	return acf
 
@@ -2056,6 +2414,25 @@ def randPos(dbox3, rng=np.random):
 	return x
 
 
+### calculate weighted mean
+def calcMean(A, weights=None):
+	if weights is None:
+		return np.mean(A)
+	else:
+		return np.sum(weights*A)/np.sum(weights)
+
+
+### calculate weighted standard deviation
+def calcNormStats(A, weights=None):
+	if weights is None:
+		return np.mean(A), np.std(A)
+	else:
+		sumw = np.sum(weights)
+		mu = np.sum(weights*A)/sumw
+		sigma = np.sqrt(np.sum(weights*(A-mu)**2)/sumw)
+		return mu, sigma
+
+
 ################################################################################
 ### Random
 
@@ -2087,7 +2464,7 @@ def sortPointsByMolecule(points, molecules):
 	for i in range(nstep):
 		n_molecule_count = np.zeros(nmolecule, dtype=int)
 		for j in range(npoint):
-			points_moleculed[molecules[j]-1][i,n_molecule_count[molecules[j]-1],:] = points[i,j,:]
+			points_moleculed[molecules[j]-1][i,n_molecule_count[molecules[j]-1]] = points[i,j]
 			n_molecule_count[molecules[j]-1] += 1
 	return points_moleculed
 
