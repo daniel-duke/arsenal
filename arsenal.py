@@ -1275,6 +1275,7 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 	color			= None		if 'color' not in kwargs else kwargs['color']
 	edgecolor		= 'auto'	if 'edgecolor' not in kwargs else kwargs['edgecolor']
 	alpha			= 0.6		if 'alpha' not in kwargs else kwargs['alpha']
+	edgealpha		= 1			if 'edgealpha' not in kwargs else kwargs['edgealpha']
 	solidify		= False		if 'solidify' not in kwargs else kwargs['solidify']
 	label			= None		if 'label' not in kwargs else kwargs['label']
 	gauss_label		= 'auto'	if 'gauss_label' not in kwargs else kwargs['gauss_label']
@@ -1431,6 +1432,7 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 	A = np.asarray(A)
 	if weights is not None:
 		weights = np.asarray(weights)
+	N = len(A)
 
 	### calculate histogram
 	heights, edges = np.histogram(A, nbin, weights=weights, range=Alim_bin)
@@ -1442,7 +1444,7 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 	if weights is not None:
 		area_full = sum(weights)*width_bin
 	else:
-		area_full = len(A)*width_bin
+		area_full = N*width_bin
 
 	### determine density scaling
 	scale = area_plot if useDensity else 1
@@ -1488,9 +1490,10 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 		plt.bar(centers, heights/scale, width_bin, color='white')
 
 	### plot data as bins
-	if plotBins:		
-		bars = plt.bar(centers, heights/scale, width_bin, color=color, alpha=alpha, edgecolor=edgecolor)
-		color = bars[0].get_facecolor()
+	if plotBins:
+		bars = plt.bar(centers, heights/scale, width_bin, color=color, alpha=alpha)
+		plt.bar(centers, heights/scale, width_bin, facecolor='none', edgecolor=edgecolor, alpha=edgealpha)
+		color = bars[0].get_facecolor()[:3]
 		if not isDataLabeled:
 			bars[0].set_label(label)
 			isDataLabeled = True
@@ -1498,7 +1501,7 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 	### plot data as steps
 	if plotSteps:
 		bars = plt.hist(A, nbin, weights=weights, range=Alim_bin, color=color, linewidth=2, histtype='step')[2]
-		color = bars[0].get_edgecolor()
+		color = bars[0].get_edgecolor()[:3]
 		if not isDataLabeled:
 			bars[0].set_label(label)
 			isDataLabeled = True
@@ -1506,7 +1509,7 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 	### plot data as line
 	if plotLine:
 		line = plt.plot(centers, heights, color=color, linewidth=2)[0]
-		color = line.get_color()
+		color = line.get_color()[:3]
 		if not isDataLabeled:
 			line.set_label(label)
 			isDataLabeled = True
@@ -1521,7 +1524,7 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 		boot = np.zeros((nbootstrap, nbin))
 		probs = weights / np.sum(weights) if weights is not None else None
 		for b in range(nbootstrap):
-			idxs = rng.choice(len(A), size=len(A), replace=True, p=probs)
+			idxs = rng.choice(N, size=N, replace=True, p=probs)
 			boot[b] = np.histogram(A[idxs], nbin, range=Alim_bin)[0]
 		heights_lower = np.percentile(boot, percentile_lower, axis=0)
 		heights_upper = np.percentile(boot, percentile_upper, axis=0)
@@ -1533,8 +1536,8 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 	if plotGauss:
 		X = np.linspace(Alim_bin[0], Alim_bin[1], npoint_fit)
 		Y = gaussian_kde(A, weights=weights)(X)*area_full
-		curve = plt.plot(X, Y/scale, color=color, linewidth=2, alpha=1)[0]
-		color = curve.get_color()
+		curve = plt.plot(X, Y/scale, color=color, linewidth=2)[0]
+		color = curve.get_color()[:3]
 		if gauss_color != 'match':
 			curve.set_color(gauss_color)
 		if gauss_label == 'match':
@@ -1549,7 +1552,7 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 			boot = np.zeros((nbootstrap, npoint_fit))
 			probs = weights / np.sum(weights) if weights is not None else None
 			for b in range(nbootstrap):
-				idxs = rng.choice(len(A), size=len(A), replace=True, p=probs)
+				idxs = rng.choice(N, size=N, replace=True, p=probs)
 				boot[b] = gaussian_kde(A[idxs])(X)*area_full
 			Y_lower = np.percentile(boot, percentile_lower, axis=0)
 			Y_upper = np.percentile(boot, percentile_upper, axis=0)
@@ -1564,8 +1567,8 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 		mu, sigma = ars.calcNormStats(A, weights)
 		X = np.linspace(Alim_bin[0], Alim_bin[1], npoint_fit)
 		Y = norm.pdf(X, loc=mu, scale=sigma)*area_full
-		curve = plt.plot(X, Y/scale, color=color, linewidth=2, alpha=1)[0]
-		color = curve.get_color()
+		curve = plt.plot(X, Y/scale, color=color, linewidth=2)[0]
+		color = curve.get_color()[:3]
 		if norm_color != 'match':
 			curve.set_color(norm_color)
 		if norm_label == 'match':
@@ -1580,7 +1583,7 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 			probs = weights / np.sum(weights) if weights is not None else None
 			boot = np.zeros((nbootstrap, npoint_fit))
 			for b in range(nbootstrap):
-				idxs = rng.choice(len(A), size=Neff, replace=True, p=probs)
+				idxs = rng.choice(N, size=N, replace=True, p=probs)
 				mu, sigma = ars.calcNormStats(A[idxs])
 				boot[b] = norm.pdf(X, loc=mu, scale=sigma)*area_full
 			Y_lower = np.percentile(boot, percentile_lower, axis=0)
@@ -1597,8 +1600,8 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 		mu, sigma = ars.calcNormStats(logA, weights)
 		X = np.linspace(Alim_bin[0], Alim_bin[1], npoint_fit)
 		Y = lognorm.pdf(X, s=sigma, scale=np.exp(mu))*area_full
-		curve = plt.plot(X, Y/scale, color=color, linewidth=2, alpha=1)[0]
-		color = curve.get_color()
+		curve = plt.plot(X, Y/scale, color=color, linewidth=2)[0]
+		color = curve.get_color()[:3]
 		if logNorm_color != 'match':
 			curve.set_color(logNorm_color)
 		if logNorm_label == 'match':
@@ -1613,7 +1616,7 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 			probs = weights / np.sum(weights) if weights is not None else None
 			boot = np.zeros((nbootstrap, npoint_fit))
 			for b in range(nbootstrap):
-				idxs = rng.choice(len(A), size=Neff, replace=True, p=probs)
+				idxs = rng.choice(N, size=N, replace=True, p=probs)
 				mu, sigma = ars.calcNormStats(logA[idxs])
 				boot[b] = lognorm.pdf(X, s=sigma, scale=np.exp(mu))*area_full
 			Y_lower = np.percentile(boot, percentile_lower, axis=0)
@@ -1651,7 +1654,7 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 			line.set_color(color)
 		else:
 			line.set_color(std_color)
-		line = plt.axvline(avg-std, linestyle=':', linewidth=2, alpha=1)
+		line = plt.axvline(avg-std, linestyle=':', linewidth=2)
 		if std_color == 'match':
 			line.set_color(color)
 		else:

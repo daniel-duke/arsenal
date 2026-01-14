@@ -27,3 +27,5 @@
 *.out
 *.app
 
+# Apple
+.DS_Store
