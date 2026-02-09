@@ -50,7 +50,7 @@ def readWriteOxDNA(datFile, precision, report_every):
 
 	### extract metadata
 	if report_every: print("Getting metadata from trajectory...")
-	checkFileExist(datFile, "trajectory")
+	checkFileExist(datFile, "trajectory", requireData=True)
 	with open(datFile, 'r') as f:
 
 		for i in range(2): line = f.readline()
@@ -101,10 +101,15 @@ def applyPBC(r, dbox):
 	return r - dbox*np.round(r/dbox)
 
 
-### test if files exist
-def checkFileExist(file, name="the", required=True):
+### determine if file exists
+def checkFileExist(file, name="the", required=True, requireData=False):
 	if os.path.isfile(file):
-		return True
+		if not requireData or os.path.getsize(file):
+			return True
+		else:
+			print(f"Error: {name} file has no content:")
+			print(file + "\n")
+			sys.exit()
 	else:
 		if required:
 			print(f"Error: Could not find {name} file:")

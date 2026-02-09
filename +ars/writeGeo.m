@@ -20,7 +20,7 @@ function writeGeo(geoFile,dbox,atoms,bonds,angles,options)
     %%% input
     % atoms - 5 x natom array of molecule IDs, atom types, and positions
     % bonds - 3 x nbond array of bond types and bonded atom IDs
-    % angles - 4 xnangle array of angle types and angled atom IDs
+    % angles - 4 x nangle array of angle types and angled atom IDs
     % dihedrals -  4 x ndihedral array of dihedral types and dihedraled atom IDs
     % charges - 1 x natom array of atom charges
 
@@ -28,7 +28,6 @@ function writeGeo(geoFile,dbox,atoms,bonds,angles,options)
     natom = size(atoms,2);
     nbond = size(bonds,2);
     nangle = size(angles,2);
-    nmolecule = max(atoms(1,:));
 
     %%% interpret input
     if options.natomType == "auto"
@@ -77,7 +76,7 @@ function writeGeo(geoFile,dbox,atoms,bonds,angles,options)
     len_nangle = floor(log10(nangle))+1;
     len_ndihedral = floor(log10(ndihedral))+1;
     len_nobject = max([len_natom,len_nbond,len_nangle,len_ndihedral]);
-    len_nmolecule = floor(log10(nmolecule))+1;
+    len_nmolecule = floor(log10(max(atoms(1,:))))+1;
     len_natomType = floor(log10(natomType))+1;
     len_nbondType = floor(log10(nbondType))+1;
     len_nangleType = floor(log10(nangleType))+1;

@@ -36,7 +36,7 @@ def readWriteOxDNA(datFile, coarse_time):
 
 	### extract metadata
 	print("Getting metadata from trajectory...")
-	checkFileExist(datFile, "trajectory")
+	checkFileExist(datFile, "trajectory", requireData=True)
 	with open(datFile, 'r') as f:
 
 		line = f.readline()
@@ -87,9 +87,14 @@ def readWriteOxDNA(datFile, coarse_time):
 ### Utility Functions
 
 ### determine if file exists
-def checkFileExist(file, name="the", required=True):
+def checkFileExist(file, name="the", required=True, requireData=False):
 	if os.path.isfile(file):
-		return True
+		if not requireData or os.path.getsize(file):
+			return True
+		else:
+			print(f"Error: {name} file has no content:")
+			print(file + "\n")
+			sys.exit()
 	else:
 		if required:
 			print(f"Error: Could not find {name} file:")

@@ -2,6 +2,7 @@ import arsenal as ars
 import numpy as np
 import math
 import matplotlib.pyplot as plt
+from matplotlib.colors import to_rgb
 from scipy.stats import linregress
 from scipy.stats import gaussian_kde
 from scipy.stats import norm
@@ -19,9 +20,6 @@ import ast
 # Welcome! You have stumbled upon my humble arsenal of python functions for
   # analyzing simulations relevant to DNA origami, from oxDNA to DNAfold to
   # mesoscopic LAMMPS models. Enjoy!
-
-## Notes
-# For all plotting functions, 
 
 ## Terminology
 # bais - 2D python array containing lists of base indices (starting from 0)
@@ -46,7 +44,7 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 	ntFirstStrand 	= 'auto'	if 'ntFirstStrand' not in kwargs else kwargs['ntFirstStrand']
 	useHbondSite 	= False		if 'useHbondSite' not in kwargs else kwargs['useHbondSite']
 	ignorePBC 		= False		if 'ignorePBC' not in kwargs else kwargs['ignorePBC']
-	getDbox3 		= False		if 'useDbox3' not in kwargs else kwargs['useDbox3']
+	getDbox3 		= False		if 'getDbox3' not in kwargs else kwargs['getDbox3']
 	getUsedEvery	= False		if 'getUsedEvery' not in kwargs else kwargs['getUsedEvery']
 	report_every	= 1000		if 'report_every' not in kwargs else kwargs['report_every']
 
@@ -329,9 +327,9 @@ def readDump(dumpFile, nstep_skip=0, coarse_time=1, cols='all', nstep_max='all',
 	if cols == 'all':
 		cols = np.arange(ncol_dump,dtype=int)
 	elif ars.isinteger(cols) and cols < ncol_dump:
-		cols = np.array([cols])
+		cols = np.asarry([cols])
 	elif ars.isarray(cols) and ars.isinteger(cols[0]) and max(cols) < ncol_dump:
-		cols = np.array(cols)
+		cols = np.asarry(cols)
 	else:
 		print("Error: Cannot read dump - columns must be 'all', integer, or 1D integer array.")
 		sys.exit()
@@ -722,11 +720,13 @@ def writeGeo(geoFile, dbox3, r, molecules='auto', types='auto', bonds=None, angl
 	  # values it is given).
 	# bonds: nbond x 3 (bond type, atom 1, atom2) numpy array
 	# angles: nangle x 4 (angle type, atom 1, atom2, atom 3) numpy array
-
-	### count atoms
+	
+	### count objects
 	natom = len(r)
+	nbond = len(bonds) if bonds is not None else 0
+	nangle = len(angles) if angles is not None else 0
 
-	### interpret input
+	### interpret required data
 	if ars.isnumber(dbox3):
 		dbox3 = np.ones(3)*dbox3
 	elif not ars.isarray(dbox3) or len(dbox3) != 3:
@@ -736,10 +736,6 @@ def writeGeo(geoFile, dbox3, r, molecules='auto', types='auto', bonds=None, angl
 		molecules = np.zeros(natom, dtype=int)
 	if isinstance(types, str) and types == 'auto':
 		types = np.ones(natom, dtype=int)
-	if bonds is None:
-		bonds = np.zeros((0,3), dtype=int)
-	if angles is None:
-		angles = np.zeros((0,4), dtype=int)
 
 	### inerpret charges
 	if charges is None:
@@ -747,10 +743,8 @@ def writeGeo(geoFile, dbox3, r, molecules='auto', types='auto', bonds=None, angl
 	elif isinstance(charges, str) and charges == 'auto':
 		includeCharge = True
 		charges = np.zeros(natom, dtype=int)
-		len_charge = 1
 	elif ars.isarray(charges) and len(charges) == natom:
 		includeCharge = True
-		len_charge = len(str(int(max(charges))))
 	else:
 		print("Flag: Not writing geometry file - charges must be 'auto' or natom-element array.")
 		return
@@ -760,41 +754,32 @@ def writeGeo(geoFile, dbox3, r, molecules='auto', types='auto', bonds=None, angl
 		includeExtra = False
 	elif ars.isarray(extras) and len(extras) == natom:
 		includeExtra = True
-		extras = np.array(extras)
-		if len(extras.shape) == 1:
-			extras = extras.reshape(-1,1)
-		nextra = extras.shape[1]
-		len_extra = [None]*nextra
-		for i in range(nextra):
-			len_extra[i] = len(str(int(max(extras[:,i]))))
 	else:
-		print("Flag: Not writing geometry file - if given, extras must array with natom elements in the first dimension.")
+		print("Flag: Not writing geometry file - extras must be array with natom elements in the first dimension.")
 		return
 
-	### count objects
-	nmolecule = int(max(molecules))
-	nbond = len(bonds)
-	nangle = len(angles)
+	### numpify data
+	r = np.asarray(r)
+	molecules = np.asarray(molecules)
+	types = np.asarray(types)
+	bonds = np.asarray(bonds)
+	angles = np.asarray(angles)
+	charges = np.asarray(charges)
+	extras = np.asarray(extras)
 
-	### interpret input
+	### interpret object counts
 	if isinstance(natomType, str) and natomType == 'auto':
 		natomType = int(max(types))
 	elif not ars.isinteger(natomType):
 		print("Flag: Not writing geometry file - natomType must be 'auto' or integer.")
 		return
-	if isinstance(nbondType, str) and nbondType == 'auto':
-		if nbond > 0:
-			nbondType = int(max(bonds[:,0]))
-		else:
-			nbondType = 0
+	if isinstance(nbondType, str) and nbondType == 'auto':\
+		nbondType = int(max(bonds[:,0])) if nbond else 0
 	elif not ars.isinteger(nbondType):
 		print("Flag: Not writing geometry file - nbondType must be 'auto' or integer.")
 		return
 	if isinstance(nangleType, str) and nangleType == 'auto':
-		if nangle > 0:
-			nangleType = int(max(angles[:,0]))
-		else:
-			nangleType = 0
+		nangleType = int(max(angles[:,0])) if nangle else 0
 	elif not ars.isinteger(nangleType):
 		print("Flag: Not writing geometry file - nangleType must be 'auto' or integer.")
 		return
@@ -806,17 +791,51 @@ def writeGeo(geoFile, dbox3, r, molecules='auto', types='auto', bonds=None, angl
 		print("Flag: Not writing geometry file - masses must be 'auto' or natomType-element array.")
 		return
 
+	### process extras
+	if includeExtra:
+		if len(extras.shape) == 1:
+			extras = extras.reshape(-1,1)
+		nextra = extras.shape[1]
+		if ars.isinteger(e_precision):
+			e_precision = [e_precision]*nextra
+		elif not ars.isarray(e_precision) or len(e_precision) != nextra:
+			print("Flag: Not writing geometry file - extra precision must be integer or nextra-element array.")
+			return
+
 	### count digits
 	len_natom = len(str(natom))
 	len_nbond = len(str(nbond))
 	len_nangle = len(str(nangle))
 	len_nobject = max([len_natom,len_nbond,len_nangle])
-	len_nmolecule = len(str(nmolecule))
+	len_nmolecule = len(str(int(max(molecules))))
 	len_natomType = len(str(natomType))
 	len_nbondType = len(str(nbondType))
 	len_nangleType = len(str(nangleType))
 	len_nobjectType = max([len_natomType,len_nbondType,len_nangleType])
 	len_dbox3 = len(str(int(max(dbox3)/2)))
+
+	### determine space for position data
+	len_x = 1+len_dbox3
+	if x_precision > 0:
+		len_x += 1+x_precision
+
+	### determine space for charge data
+	if includeCharge:
+		len_q = len(str(int(max(abs(charges)))))
+		if min(charges) < 0:
+			len_q += 1
+		if q_precision > 0:
+			len_q += 1+q_precision
+
+	### determine space for extra data
+	if includeExtra:
+		len_e = [None]*nextra
+		for i in range(nextra):
+			len_e[i] = len(str(int(max(abs(extras[:,i])))))
+			if min(extras[:,i]) < 0:
+				len_e[i] += 1
+			if e_precision[i] > 0:
+				len_e[i] += 1+e_precision[i]
 
 	### write to file
 	with open(geoFile, 'w') as f:
@@ -836,9 +855,9 @@ def writeGeo(geoFile, dbox3, r, molecules='auto', types='auto', bonds=None, angl
 			f.write(f"\t{nangleType:<{len_nobjectType}} angle types\n")
 
 		f.write("\n## Simulation Box\n")
-		f.write(f"\t{-dbox3[0]/2:>{len_dbox3+x_precision+2}.{x_precision}f} {dbox3[0]/2:>{len_dbox3+x_precision+1}.{x_precision}f} xlo xhi\n")
-		f.write(f"\t{-dbox3[1]/2:>{len_dbox3+x_precision+2}.{x_precision}f} {dbox3[1]/2:>{len_dbox3+x_precision+1}.{x_precision}f} ylo yhi\n")
-		f.write(f"\t{-dbox3[2]/2:>{len_dbox3+x_precision+2}.{x_precision}f} {dbox3[2]/2:>{len_dbox3+x_precision+1}.{x_precision}f} zlo zhi\n")
+		f.write(f"\t{-dbox3[0]/2:>{len_x}.{x_precision}f} {dbox3[0]/2:>{len_x-1}.{x_precision}f} xlo xhi\n")
+		f.write(f"\t{-dbox3[1]/2:>{len_x}.{x_precision}f} {dbox3[1]/2:>{len_x-1}.{x_precision}f} ylo yhi\n")
+		f.write(f"\t{-dbox3[2]/2:>{len_x}.{x_precision}f} {dbox3[2]/2:>{len_x-1}.{x_precision}f} zlo zhi\n")
 
 		f.write("\nMasses\n\n")
 		for i in range(natomType):
@@ -850,10 +869,10 @@ def writeGeo(geoFile, dbox3, r, molecules='auto', types='auto', bonds=None, angl
 					f" {int(molecules[i]):<{len_nmolecule}}" + \
 					f" {int(types[i]):<{len_natomType}}")
 			if includeCharge:
-				f.write(f" {charges[i]:>{len_charge+q_precision+1}.{q_precision}f}") 
-			f.write(f"  {r[i,0]:>{len_dbox3+x_precision+2}.{x_precision}f}" + \
-					 f" {r[i,1]:>{len_dbox3+x_precision+2}.{x_precision}f}" + \
-					 f" {r[i,2]:>{len_dbox3+x_precision+2}.{x_precision}f}\n")
+				f.write(f" {charges[i]:>{len_q}.{q_precision}f}") 
+			f.write(f" {r[i,0]:>{len_x}.{x_precision}f}" + \
+					f" {r[i,1]:>{len_x}.{x_precision}f}" + \
+					f" {r[i,2]:>{len_x}.{x_precision}f}\n")
 
 		if nbond:
 			f.write("\nBonds\n\n")
@@ -877,7 +896,7 @@ def writeGeo(geoFile, dbox3, r, molecules='auto', types='auto', bonds=None, angl
 			for i in range(natom):
 				f.write(f"\t{i+1:<{len_natom}}")
 				for j in range(nextra):
-					f.write(f" {extras[i][j]:>{len_extra[j]+e_precision+2}.{e_precision}f}")
+					f.write(f" {extras[i][j]:>{len_e[j]}.{e_precision[j]}f}")
 				f.write("\n")
 
 
@@ -903,7 +922,7 @@ def unpickle(pklFile, dims=None, hushExtraFlag=False):
 			sys.exit()
 
 		### trim pickle array if too long
-		elif len(cucumber) > len(sims):
+		elif len(cucumber) > len(dims):
 			if not hushExtraFlag:
 				print("Flag: pickle array contained more elements than expected, ignoring some elements of the pickle array.")
 			cucumber = cucumber[:len(dims)]
@@ -1092,6 +1111,9 @@ def plotConv(A, Alabel=None, title=None, figLabel='auto', Alim='auto', Xlim='aut
 	### additional keyword args
 	ax = None if 'ax' not in kwargs else kwargs['ax']
 
+	### numpify data
+	A = np.asarray(A, dtype=float)
+
 	### interpret input
 	if isinstance(Alim, str) and Alim == 'auto':
 		Amin = min(A)
@@ -1123,7 +1145,7 @@ def plotConv(A, Alabel=None, title=None, figLabel='auto', Alim='auto', Xlim='aut
 	avg = np.zeros(len(A))
 	sem = np.zeros(len(A))
 	for i in range(len(A)):
-		avg[i] = np.mean(A[0:i+1])
+		avg[i] = np.nanmean(A[0:i+1])
 		if i > 0:
 			sem[i] = ars.calcSEMautocorr(A[0:i+1], hush=True)
 
@@ -1223,6 +1245,7 @@ def plotLine(X, Y, title=None, figLabel='auto', Xlim='auto', Ylim='auto', Xlabel
 	ecolor		= None		if 'ecolor' not in kwargs else kwargs['ecolor']
 	ecapsize	= None		if 'ecapsize' not in kwargs else kwargs['ecapsize']
 	elinewidth	= None		if 'elinewidth' not in kwargs else kwargs['elinewidth']
+	eshaded		= False		if 'eshaded' not in kwargs else kwargs['eshaded']
 	label		= None		if 'label' not in kwargs else kwargs['label']
 	ax			= None		if 'ax' not in kwargs else kwargs['ax']
 
@@ -1242,7 +1265,10 @@ def plotLine(X, Y, title=None, figLabel='auto', Xlim='auto', Ylim='auto', Xlabel
 	
 	### plot errorbars
 	if E is not None:
-		plt.errorbar(X, Y, E, fmt='none', ecolor=ecolor, capsize=ecapsize, linewidth=elinewidth, capthick=elinewidth)
+		if not eshaded:
+			plt.errorbar(X, Y, E, fmt='none', ecolor=ecolor, capsize=ecapsize, linewidth=elinewidth, capthick=elinewidth)
+		else:
+			plt.fill_between(X, Y-E, Y+E, color=ecolor, alpha=0.2, linewidth=0)
 
 	### plot line
 	plt.plot(X, Y, color=color, linestyle=linestyle, marker=marker, markersize=markersize, alpha=alpha, zorder=zorder,label=label)
@@ -1251,7 +1277,125 @@ def plotLine(X, Y, title=None, figLabel='auto', Xlim='auto', Ylim='auto', Xlabel
 	if Xlim != 'auto':
 		plt.xlim(Xlim)
 	if Ylim != 'auto':
-		plt.xlim(Ylim)
+		plt.ylim(Ylim)
+	if Xlabel is not None:
+		plt.xlabel(Xlabel)
+	if Ylabel is not None:
+		plt.ylabel(Ylabel)
+	if title is not None:
+		plt.title(title)
+
+
+### plot means
+def plotDists(As, X=None, title=None, figLabel='auto', Xlim='auto', Ylim='auto', Xlabel=None, Ylabel=None, **kwargs):
+
+	### additional keyword args
+	plotPoints		= 'auto'	if 'plotPoints' not in kwargs else kwargs['plotPoints']
+	plotViolin		= False		if 'plotViolin' not in kwargs else kwargs['plotViolin']
+	plotBox			= False		if 'plotBox' not in kwargs else kwargs['plotBox']
+	boxInViolin		= False		if 'boxInViolin' not in kwargs else kwargs['boxInViolin']
+	plotAvgs		= False		if 'plotAvgs' not in kwargs else kwargs['plotAvgs']
+	plotMeds		= True		if 'plotMeds' not in kwargs else kwargs['plotMeds']
+	color			= None		if 'color' not in kwargs else kwargs['color']
+	edgecolor		= 'grey'	if 'edgecolor' not in kwargs else kwargs['edgecolor']
+	alpha			= 0.4		if 'alpha' not in kwargs else kwargs['alpha']
+	edgealpha		= 1			if 'edgealpha' not in kwargs else kwargs['edgealpha']
+	pointalpha		= 0.1		if 'pointalpha' not in kwargs else kwargs['pointalpha']
+	flieralpha		= 0.6		if 'flieralpha' not in kwargs else kwargs['flieralpha']
+	label			= None		if 'label' not in kwargs else kwargs['label']
+	ax				= None		if 'ax' not in kwargs else kwargs['ax']
+
+	### ensure valid input
+	if isinstance(plotPoints, str) and plotPoints == 'auto':
+		plotPoints = True
+		if plotViolin or plotBox:
+			plotPoints = False
+	if plotPoints + plotViolin + plotBox != 1:
+		print("Flag: Skipping distributions plot - exactly one plot type (points, violin, box) should be true.")
+		return
+	if plotPoints and color is None:
+		color = 'purple'
+
+	### initialize figure
+	if ax is not None:
+		if figLabel != 'auto' and figLabel is not None:
+			print("Flag: Unused figure label input.")
+			figLabel = None
+	elif figLabel == 'auto':
+		figLabel = "Dists"
+
+	### initialize figure
+	if ax is not None:
+		plt.sca(ax)
+	else:
+		plt.figure(figLabel)
+
+	### transform into list of vectors
+	As = [ A for A in As ]
+	avgs = [ np.mean(A) for A in As ]
+	meds = [ np.median(A) for A in As ]
+
+	### point plot
+	if plotPoints:
+		stds = [ np.std(A) for A in As ]
+		lens = [ len(A) for A in As ]
+		Xs = np.repeat(X, lens)
+		ars.plotPoints(Xs, As, color='black', alpha=pointalpha, figLabel=figLabel)
+		if plotAvgs:
+			ars.plotPoints(X, avgs, S=12, E=stds, ecapsize=6, elinewidth=2, ecolor=color, figLabel=figLabel)
+		if plotMeds:
+			ars.plotPoints(X, meds, S=12, figLabel=figLabel)
+
+	### nice plot
+	if plotViolin or plotBox:
+		w = 0.5
+		if X is not None:
+			X_sorted = np.sort(X)
+			w = min(X_sorted[1:]-X_sorted[:-1])/2
+
+		### violin plot
+		if plotViolin:
+			vs = plt.violinplot(As, positions=X, widths=w, showextrema=False)
+			for vb in vs['bodies']:
+				vb.set_alpha(alpha)
+				vb.set_edgecolor('none')
+			vs = plt.violinplot(As, positions=X, widths=w, showextrema=False)
+			for vb in vs['bodies']:
+				vb.set_facecolor('none')
+				vb.set_alpha(edgealpha)
+				vb.set_edgecolor(edgecolor)
+
+			### box inside violin
+			if not boxInViolin:
+				if plotAvgs:
+					ars.plotPoints(X, avgs, color='black', figLabel=figLabel, zorder=3)
+				if plotMeds:
+					ars.plotPoints(X, meds, color='black', figLabel=figLabel, zorder=3)
+			else:
+				q1s, q3s = np.transpose([np.percentile(A, [25, 75]) for A in As])
+				mins = np.array([a.min() for a in As])
+				maxs = np.array([a.max() for a in As])
+				ars.plotPoints(X, meds, color='white', S=8, figLabel=figLabel, zorder=3)
+				plt.vlines(X, mins, maxs, color=edgecolor, alpha=edgealpha, linewidth=1)
+				plt.vlines(X, q1s, q3s, color='black', linewidth=4)
+
+		### box plot
+		if plotBox:
+			plt.boxplot(As, positions=X, widths=w, patch_artist=True, manage_ticks=False,
+				boxprops=dict(facecolor=color, alpha=alpha, edgecolor='none'),
+				medianprops=dict(color='none'), whiskerprops=dict(color='none'), capprops=dict(color='none'), flierprops=dict(color='none'))
+			plt.boxplot(As, positions=X, widths=w, patch_artist=True, manage_ticks=False,
+				medianprops=dict(color='black', linewidth=2),
+				boxprops=dict(facecolor='none', edgecolor=edgecolor, alpha=edgealpha),
+				whiskerprops=dict(color=edgecolor, alpha=edgealpha, linestyle='--'),
+				capprops=dict(color=edgecolor, alpha=edgealpha),
+				flierprops=dict(color=edgecolor, alpha=flieralpha))
+
+	### format
+	if Xlim != 'auto':
+		plt.xlim(Xlim)
+	if Ylim != 'auto':
+		plt.ylim(Ylim)
 	if Xlabel is not None:
 		plt.xlabel(Xlabel)
 	if Ylabel is not None:
@@ -1301,7 +1445,15 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 	std_label		= 'auto'	if 'std_label' not in kwargs else kwargs['std_label']
 	std_color		= 'red'		if 'std_color' not in kwargs else kwargs['std_color']
 	ax				= None		if 'ax' not in kwargs else kwargs['ax']
-	hush			= False		if 'hush' not in kwargs else kwargs['hush']
+	hush			= True		if 'hush' not in kwargs else kwargs['hush']
+
+	### clean data
+	A = np.asarray(A, dtype=float)
+	A = A[~np.isnan(A)]
+	if weights is not None:
+		weights = np.asarray(weights, dtype=float)
+		weights = weights[~np.isnan(A)]
+	N = len(A)
 
 	### determine whether plotting raw data
 	plotData = plotBins or plotSteps or plotLine
@@ -1428,12 +1580,6 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 	if label or gauss_label or norm_label or logNorm_label or avg_label or med_label or std_label:
 		legend = True
 
-	### numpify data
-	A = np.asarray(A)
-	if weights is not None:
-		weights = np.asarray(weights)
-	N = len(A)
-
 	### calculate histogram
 	heights, edges = np.histogram(A, nbin, weights=weights, range=Alim_bin)
 	centers = edges[:len(edges)-1] + 1/2*(edges[1]-edges[0])
@@ -1493,7 +1639,7 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 	if plotBins:
 		bars = plt.bar(centers, heights/scale, width_bin, color=color, alpha=alpha)
 		plt.bar(centers, heights/scale, width_bin, facecolor='none', edgecolor=edgecolor, alpha=edgealpha)
-		color = bars[0].get_facecolor()[:3]
+		color = to_rgb(bars[0].get_facecolor())
 		if not isDataLabeled:
 			bars[0].set_label(label)
 			isDataLabeled = True
@@ -1501,7 +1647,7 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 	### plot data as steps
 	if plotSteps:
 		bars = plt.hist(A, nbin, weights=weights, range=Alim_bin, color=color, linewidth=2, histtype='step')[2]
-		color = bars[0].get_edgecolor()[:3]
+		color = to_rgb(bars[0].get_edgecolor())
 		if not isDataLabeled:
 			bars[0].set_label(label)
 			isDataLabeled = True
@@ -1509,7 +1655,7 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 	### plot data as line
 	if plotLine:
 		line = plt.plot(centers, heights, color=color, linewidth=2)[0]
-		color = line.get_color()[:3]
+		color = to_rgb(line.get_color())
 		if not isDataLabeled:
 			line.set_label(label)
 			isDataLabeled = True
@@ -1537,7 +1683,7 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 		X = np.linspace(Alim_bin[0], Alim_bin[1], npoint_fit)
 		Y = gaussian_kde(A, weights=weights)(X)*area_full
 		curve = plt.plot(X, Y/scale, color=color, linewidth=2)[0]
-		color = curve.get_color()[:3]
+		color = to_rgb(curve.get_color())
 		if gauss_color != 'match':
 			curve.set_color(gauss_color)
 		if gauss_label == 'match':
@@ -1568,7 +1714,7 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 		X = np.linspace(Alim_bin[0], Alim_bin[1], npoint_fit)
 		Y = norm.pdf(X, loc=mu, scale=sigma)*area_full
 		curve = plt.plot(X, Y/scale, color=color, linewidth=2)[0]
-		color = curve.get_color()[:3]
+		color = to_rgb(curve.get_color())
 		if norm_color != 'match':
 			curve.set_color(norm_color)
 		if norm_label == 'match':
@@ -1601,7 +1747,7 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 		X = np.linspace(Alim_bin[0], Alim_bin[1], npoint_fit)
 		Y = lognorm.pdf(X, s=sigma, scale=np.exp(mu))*area_full
 		curve = plt.plot(X, Y/scale, color=color, linewidth=2)[0]
-		color = curve.get_color()[:3]
+		color = to_rgb(curve.get_color())
 		if logNorm_color != 'match':
 			curve.set_color(logNorm_color)
 		if logNorm_label == 'match':
@@ -1686,6 +1832,10 @@ def plotHist2D(A, B, Alabel=None, Blabel=None, title=None, figLabel='auto', nbin
 
 	### additional keyword args
 	ax = None if 'ax' not in kwargs else kwargs['ax']
+
+	### clean data
+	A = np.asarray(A, dtype=float)
+	A = A[~np.isnan(A)]
 
 	### interpret input
 	if isinstance(nbin, str) and nbin == 'auto':
@@ -1861,7 +2011,7 @@ def plotUS(ops_eq, weights, ops_ts, ops_wham, PMF, PMF_err, opLabel="Order Param
 		if auto_bin == True:
 			nbin = ars.optbins(ops_ts[i], 50)
 		label = f"$OP={ops_eq[i]:0.{op_precision}f}$, $w={weights[i]:0.{weight_precision}f}$"
-		ars.plotHist(ops_ts[i], figLabel=figLabelHist, nbin=nbin, Alim_plot=None, alpha=0.4, plotGauss=True, label=label)
+		ars.plotHist(ops_ts[i], figLabel=figLabelHist, nbin=nbin, Alim_plot=None, alpha=0.4, useDensity=True, plotGauss=True, label=label)
 	plt.xlabel(opLabel)
 	plt.ylabel('Density')
 	if insideLegend:
@@ -2041,9 +2191,15 @@ def centerPointsMolecule(points, molecules, dbox3s, center=1, unwrap=True, repor
 		dbox3s = np.ones(nstep)*dbox3s
 	if ars.isarray(dbox3s) and ars.isnumber(dbox3s[0]) and len(dbox3s) == 3:
 		dbox3s = np.ones((nstep,3))*dbox3s
-	elif not ars.isarray(dbox3s) or len(dbox3s) != nstep or not (ars.isnumber(dbox3s[0]) or (ars.isarray(dbox3s[0]) and len(dbox3s[0]) != 3)):
+	elif not ars.isarray(dbox3s) or len(dbox3s) != nstep or not ars.isarray(dbox3s[0]) or len(dbox3s[0]) != 3:
 		print("Error: Cannot center points - dbox3s must be number, nstep-element array, or nstep x 3 array.\n")
 		sys.exit()
+	if len(molecules) < npoint:
+		print("Error: Cannot center points - molecules must be npoint-element array")
+		sys.exit()
+	elif len(molecules) > npoint:
+		print("Warning: Molecules array has too many values, only using the first npoint values.")
+		molecules = molecules[:npoint]
 
 	### sort points by molecule
 	points_moleculed = ars.sortPointsByMolecule(points, molecules)
@@ -2117,7 +2273,7 @@ def centerPointsBead(points, dbox3s):
 		dbox3s = np.ones(nstep)*dbox3s
 	if ars.isarray(dbox3s) and ars.isnumber(dbox3s[0]) and len(dbox3s) == 3:
 		dbox3s = np.ones((nstep,3))*dbox3s
-	elif not ars.isarray(dbox3s) or len(dbox3s) != nstep or not (ars.isnumber(dbox3s[0]) or (ars.isarray(dbox3s[0]) and len(dbox3s[0]) != 3)):
+	elif not ars.isarray(dbox3s) or len(dbox3s) != nstep or not ars.isarray(dbox3s[0]) or len(dbox3s[0]) != 3:
 		print("Error: Cannot center points - dbox3s must be number, nstep-element array, or nstep x 3 array.\n")
 		sys.exit()
 
@@ -2308,7 +2464,11 @@ def calcSEMautocorr(A, hush=False):
 
 ### calculate correlation time
 def calcCorrTime(A, hush=False):
-	acf = ars.calcAutocorr(A)
+	A = np.asarray(A, dtype=float)
+	if any(np.isnan(A)):
+		acf = ars.calcAutocorrSafe(A)
+	else:
+		acf = ars.calcAutocorr(A)
 
 	### Sokal window method
 	M = 5
@@ -2358,6 +2518,27 @@ def calcAutocorr(A):
 	acv = np.fft.ifft(psd).real[:N]
 	acv /= np.arange(N, 0, -1)
 	acf = acv / acv[0]
+	return acf
+
+
+### calculate autocorrelation function (with safe handling of missing values)
+def calcAutocorrSafe(A):
+	A = np.asarray(A, dtype=float)
+	valid = ~np.isnan(A)
+	Ac = A - np.nanmean(A)
+	acf = np.zeros(len(A))
+	acf[0] = 1.0
+	var = np.nansum(Ac[valid]**2)
+	if var == 0:
+		return acf
+	for k in range(1, len(A)):
+		v = valid[:-k] & valid[k:]
+		n_pairs = np.sum(v)
+		if n_pairs < 1:
+			acf[k] = 0.0
+			continue
+		num = np.sum(Ac[:-k][v] * Ac[k:][v])
+		acf[k] = num / var
 	return acf
 
 
@@ -2506,9 +2687,14 @@ def trimUS(op, PMF, PMF_err):
 
 
 ### determine if file exists
-def checkFileExist(file, name="the", required=True):
+def checkFileExist(file, name="the", required=True, requireData=False):
 	if os.path.isfile(file):
-		return True
+		if not requireData or os.path.getsize(file):
+			return True
+		else:
+			print(f"Error: {name} file has no content:")
+			print(file + "\n")
+			sys.exit()
 	else:
 		if required:
 			print(f"Error: Could not find {name} file:")
@@ -2531,12 +2717,20 @@ def createEmptyFold(newFold):
 	os.makedirs(newFold)
 
 
-### render sequential array compactly
-def compressSeqArr(A):
-	if all(A[i]+1 == A[i+1] for i in range(len(A)-1)):
-		return f"[ {A[0]} ... {A[-1]} ]"
-	else:
+### render array compactly
+def compressArr(A):
+	if not ars.isarray(A):
 		return str(A)
+	elif len(A) == 1:
+		return str(A[0])
+	elif len(A) == 2:
+		return f"[{A[0]} {A[1]}]"
+	elif max(A) == min(A):
+		return f"[{A[0]} ... {A[0]}]"
+	elif all(A[i]+1 == A[i+1] for i in range(len(A)-1)):
+		return f"[{A[0]} ... {A[-1]}]"
+	else:
+		return str(np.asarray(A))
 
 
 ### test if variable is numeric (both float and integer count)
@@ -2550,23 +2744,14 @@ def isnumber(x):
 
 ### test if variable is an integer (both python int and numpy int count)
 def isinteger(x):
-	if isinstance(x, int):
+	if isinstance(x, int) or isinstance(x, np.int64):
 		return True
-	elif isinstance(x, np.int64):
-		return True
-	else:
-		return False
+	return False
 
 
 ### check if variable is an array (both list and numpy array count)
 def isarray(x):
-	if isinstance(x, list):
+	if isinstance(x, list) or isinstance(x, np.ndarray):
 		return True
-	elif isinstance(x, np.ndarray):
-		return True
-	else:
-		return False
-
-
-
+	return False
 

@@ -57,7 +57,7 @@ def main():
 ### read lammps-style atom dump
 def readAtomDump(datFile, report_every):
 	if report_every: print("Loading LAMMPS-style trajectory...")
-	checkFileExist(datFile, "trajectory")
+	checkFileExist(datFile, "trajectory", requireData=True)
 	with open(datFile, 'r') as f:
 		content = f.readlines()
 	if report_every: print("Parsing trajectory...")
@@ -229,9 +229,14 @@ def checkAllDummy(r):
 
 
 ### determine if file exists
-def checkFileExist(file, name="the", required=True):
+def checkFileExist(file, name="the", required=True, requireData=False):
 	if os.path.isfile(file):
-		return True
+		if not requireData or os.path.getsize(file):
+			return True
+		else:
+			print(f"Error: {name} file has no content:")
+			print(file + "\n")
+			sys.exit()
 	else:
 		if required:
 			print(f"Error: Could not find {name} file:")
