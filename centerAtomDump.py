@@ -31,7 +31,7 @@ def main():
 	datFile = sys.argv[1]
 	center = sys.argv[2]
 	unwrap = int(sys.argv[3])
-	set_color = int(sys.argv[4])
+	setColor = int(sys.argv[4])
 
 	### optional fifth argument
 	report_every = 0
@@ -39,7 +39,7 @@ def main():
 		report_every = int(sys.argv[5])
 
 	### read file (no skipped steps, no coarsening)
-	points, col2s, dbox3s, dump_every = readAtomDump(datFile, report_every)
+	points, col2s, dbox3s, steps_per_frame = readAtomDump(datFile, report_every)
 	if report_every: print()
 
 	### center the points
@@ -48,7 +48,7 @@ def main():
 
 	### write output file
 	outDatFile = datFile[:(len(datFile)-4)] + "_centered" + datFile[(len(datFile)-4):]
-	writeAtomDump(outDatFile, points_centered, col2s, dbox3s, dump_every, set_color)
+	writeAtomDump(outDatFile, points_centered, col2s, dbox3s, steps_per_frame, setColor)
 
 
 ################################################################################
@@ -63,7 +63,9 @@ def readAtomDump(datFile, report_every):
 	if report_every: print("Parsing trajectory...")
 
 	nbd_total = int(content[3].split()[0])
-	dump_every = int(content[nbd_total+10].split()[0]) - int(content[1].split()[0])
+	steps_per_frame = 0
+	if len(content) > nbd_total+10:
+		steps_per_frame = int(content[nbd_total+10].split()[0]) - int(content[1].split()[0])
 	nstep = int(len(content)/(nbd_total+9))
 
 	points = np.zeros((nstep,nbd_total,3))
@@ -81,25 +83,25 @@ def readAtomDump(datFile, report_every):
 		points[i] = applyPBC(points[i], dbox3s[i])
 		if report_every and (i+1)%report_every == 0:
 			print(f"processed {i+1} steps...")
-	return points, col2s, dbox3s, dump_every
+	return points, col2s, dbox3s, steps_per_frame
 
 
 ### write lammps-style atom dump
-def writeAtomDump(outDatFile, points, col2s, dbox3s, dump_every, set_color):
+def writeAtomDump(outDatFile, points, col2s, dbox3s, steps_per_frame, setColor):
 	nstep = points.shape[0]
 	npoint = points.shape[1]
 	len_npoint = len(str(npoint))
 	len_ncol2 = len(str(max(col2s)))
 	with open(outDatFile,'w') as f:
 		for i in range(nstep):
-			len_dbox = len(str(int(max(dbox3s[i]))))
-			f.write(f"ITEM: TIMESTEP\n{i*dump_every}\n")
+			len_dbox = len(str(int(max(dbox3s[i])/2)))
+			f.write(f"ITEM: TIMESTEP\n{i*steps_per_frame}\n")
 			f.write(f"ITEM: NUMBER OF ATOMS\n{npoint}\n")
 			f.write(f"ITEM: BOX BOUNDS pp pp pp\n")
-			f.write(f"-{dbox3s[i,0]/2:0{len_dbox+3}.2f} {dbox3s[i,0]/2:0{len_dbox+3}.2f} xlo xhi\n")
-			f.write(f"-{dbox3s[i,1]/2:0{len_dbox+3}.2f} {dbox3s[i,1]/2:0{len_dbox+3}.2f} ylo yhi\n")
-			f.write(f"-{dbox3s[i,2]/2:0{len_dbox+3}.2f} {dbox3s[i,2]/2:0{len_dbox+3}.2f} zlo zhi\n")
-			if set_color:
+			f.write(f"-{dbox3s[i,0]/2:<{len_dbox+3}.2f} {dbox3s[i,0]/2:<{len_dbox+3}.2f} xlo xhi\n")
+			f.write(f"-{dbox3s[i,1]/2:<{len_dbox+3}.2f} {dbox3s[i,1]/2:<{len_dbox+3}.2f} ylo yhi\n")
+			f.write(f"-{dbox3s[i,2]/2:<{len_dbox+3}.2f} {dbox3s[i,2]/2:<{len_dbox+3}.2f} zlo zhi\n")
+			if setColor:
 				f.write("ITEM: ATOMS id type xs ys zs\n")
 			else:
 				f.write("ITEM: ATOMS id mol xs ys zs\n")

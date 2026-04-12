@@ -1,5 +1,6 @@
 import arsenal as ars
 import numpy as np
+from scipy import stats
 import argparse
 import shutil
 import sys
@@ -26,10 +27,9 @@ def main():
 
 	### get arguments
 	parser = argparse.ArgumentParser()
-	parser.add_argument('--sim-type',		type=str, required=True,	help="simulation type (lammps, oxdna)")
-	parser.add_argument('--geoFile',		type=str, default=None,		help="name of lammps geometry file")
-	parser.add_argument('--topFile',		type=str, default=None,		help="name of oxdna topology file")
-	parser.add_argument('--datFile',		type=str, default=None,		help="name of trajectory file")
+	parser.add_argument('--geoFile',		type=str, default=None,		help="for lammps simulations, name of geometry file")
+	parser.add_argument('--datFile',		type=str, default=None,		help='for lammps simulations, name of trajectory file')
+	parser.add_argument('--oxFiles',		type=str, nargs=2,			help='for oxdna simulations, name of topology and configuration files')
 	parser.add_argument('--clusterFile',	type=str, default=None,		help="name of clusters file")
 	parser.add_argument('--nstep-skip',		type=int, default=0, 		help="number of recorded initial steps to skip")
 	parser.add_argument('--coarse-time',	type=int, default=1, 		help="coarse factor for time steps")
@@ -37,14 +37,18 @@ def main():
 
 	### set arguments
 	args = parser.parse_args()
-	sim_type = args.sim_type
 	geoFile = args.geoFile
-	topFile = args.topFile
 	datFile = args.datFile
+	oxFiles = args.oxFiles
 	clusterFile = args.clusterFile
 	nstep_skip = args.nstep_skip
 	coarse_time = args.coarse_time
 	center = args.center
+
+	### check for conflicting inputs
+	if geoFile is not None and oxFiles is not None:
+		print("Error: Must provide either geometry file or oxDNA files, not both.")
+		sys.exit()
 
 	### output file parameters
 	outFold = "lammpified/"
@@ -55,17 +59,14 @@ def main():
 	ars.createEmptyFold(outFold)
 
 	### lammpify lammps
-	if sim_type == "lammps":
+	if geoFile is not None:
 
-		### read geometry (required)
-		if geoFile is not None:
-			output = ars.readGeo(geoFile,getDbox3=True)
-			if len(output) == 6:
-				points_init,molecules,types,bonds,_,dbox3 = output
-			elif len(output) == 7:
-				points_init,molecules,types,_,bonds,_,dbox3 = output
-		else:
-			print("Error: geometry file required for lammps simulations.\n"); sys.exit()
+		### read geometry
+		output = ars.readGeo(geoFile,getDbox3=True)
+		if len(output) == 6:
+			points_init,molecules,types,bonds,_,dbox3 = output
+		elif len(output) == 7:
+			points_init,molecules,types,_,bonds,_,dbox3 = output
 
 		### read trajectory
 		if datFile is not None:
@@ -83,40 +84,35 @@ def main():
 		### write output
 		ars.writeGeo(outGeoFile,dbox3,points_init,types=colors,bonds=bonds,natomType=max(colors))
 		if datFile is not None:
-			writeAtomDump(outDatFile,dbox3s,points,colors)
+			ars.writeAtomDump(outDatFile,dbox3s,points,colors)
 
 	### lammpify oxdna
-	elif sim_type == "oxdna":
+	elif oxFiles is not None:
 
 		### read topology (required)
-		if topFile is not None:
-			strands,bonds,nba_total = readTop(topFile)
-		else:
-			print("Error: topology file required for oxdna simulations.\n"); sys.exit()
+		strands,bonds,nba_total = readTop(oxFiles[0])
 
-		### read and center trajecotry (required)
-		if datFile is not None:
-			points,dbox3 = ars.readOxDNA(datFile,nstep_skip,coarse_time,getDbox3=True)
-			if center: points = ars.centerPointsMolecule(points,strands,dbox3,center='com',unwrap=True)
-		else:
-			print("Error: trajectory file required for oxdna simulations.\n"); sys.exit()
+		### read and center trajecotry
+		points,dbox3 = ars.readOxDNA(oxFiles[1],nstep_skip,coarse_time,getDbox3=True)
+		if center: points = ars.centerPointsMolecule(points,strands,dbox3,center='com',unwrap=True)
 
 		### set colors
 		if clusterFile is not None:
 			clusters = ars.readCluster(clusterFile)
 			colors = getMoleculesFromClustersB0(clusters,nba_total)
 		else:
-			colors = np.minimum(strands,2)
+			strand_scaffold = stats.mode(strands).mode
+			colors = np.where(strands == strand_scaffold, 1, 2)
 
 		### write output
 		dbox3s = np.ones((points.shape[0],3))*dbox3
 		ars.writeGeo(outGeoFile,dbox3s[0],points[0,:,:],types=colors,bonds=bonds,natomType=max(colors))
 		if points.shape[0] > 1:
-			writeAtomDump(outDatFile,dbox3s,points,colors)
+			ars.writeAtomDump(outDatFile,dbox3s,points,colors)
 
 	### error
 	else:
-		print("Error: unknown simulation type, try again.")
+		print("Error: Unknown simulation type, try again.")
 		sys.exit()
 
 
@@ -139,32 +135,7 @@ def readTop(topFile):
 			bonds[bond_count,2] = int(content[i+1].split()[3])+1
 			bond_count += 1
 	bonds = bonds[:bond_count,:]
-	return strands,bonds,nba_total
-
-
-### write lammps-style atom dump
-def writeAtomDump(outDatFile,dbox3s,points,colors):
-	print("Writing trajectory...")
-	nstep = points.shape[0]
-	npoint = points.shape[1]
-	len_npoint = len(str(npoint))
-	len_ncolor = len(str(max(colors)))
-	with open(outDatFile,'w') as f:
-		for i in range(nstep):
-			len_dbox = len(str(int(max(dbox3s[i]))))
-			f.write(f"ITEM: TIMESTEP\n{i}\n")
-			f.write(f"ITEM: NUMBER OF ATOMS\n{npoint}\n")
-			f.write(f"ITEM: BOX BOUNDS pp pp pp\n")
-			f.write(f"-{dbox3s[i,0]/2:0{len_dbox+3}.2f} {dbox3s[i,0]/2:0{len_dbox+3}.2f} xlo xhi\n")
-			f.write(f"-{dbox3s[i,1]/2:0{len_dbox+3}.2f} {dbox3s[i,1]/2:0{len_dbox+3}.2f} ylo yhi\n")
-			f.write(f"-{dbox3s[i,2]/2:0{len_dbox+3}.2f} {dbox3s[i,2]/2:0{len_dbox+3}.2f} zlo zhi\n")
-			f.write("ITEM: ATOMS id type xs ys zs\n")
-			for j in range(npoint):
-				f.write(f"{j+1:<{len_npoint}} " + \
-						f"{colors[j]:<{len_ncolor}}  " + \
-						f"{points[i,j,0]/dbox3s[i,0]+1/2:10.8f} " + \
-						f"{points[i,j,1]/dbox3s[i,1]+1/2:10.8f} " + \
-						f"{points[i,j,2]/dbox3s[i,2]+1/2:10.8f}\n")
+	return strands, bonds, nba_total
 
 
 ################################################################################

@@ -8,6 +8,8 @@ from scipy.stats import gaussian_kde
 from scipy.stats import norm
 from scipy.stats import lognorm
 from scipy.special import gammaln
+from scipy.interpolate import interp1d
+from scipy.ndimage import gaussian_filter1d
 import subprocess
 import shutil
 import pickle
@@ -40,13 +42,13 @@ import ast
 def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1, nstep_max='all', **kwargs):
 
 	### additional keyword args
-	checkBackbone 	= False 	if 'checkBackbone' not in kwargs else kwargs['checkBackbone']
-	ntFirstStrand 	= 'auto'	if 'ntFirstStrand' not in kwargs else kwargs['ntFirstStrand']
-	useHbondSite 	= False		if 'useHbondSite' not in kwargs else kwargs['useHbondSite']
-	ignorePBC 		= False		if 'ignorePBC' not in kwargs else kwargs['ignorePBC']
-	getDbox3 		= False		if 'getDbox3' not in kwargs else kwargs['getDbox3']
-	getUsedEvery	= False		if 'getUsedEvery' not in kwargs else kwargs['getUsedEvery']
-	report_every	= 1000		if 'report_every' not in kwargs else kwargs['report_every']
+	checkBackbone 		= False 	if 'checkBackbone' not in kwargs else kwargs['checkBackbone']
+	ntFirstStrand 		= 'auto'	if 'ntFirstStrand' not in kwargs else kwargs['ntFirstStrand']
+	useHbondSite 		= False		if 'useHbondSite' not in kwargs else kwargs['useHbondSite']
+	ignorePBC 			= False		if 'ignorePBC' not in kwargs else kwargs['ignorePBC']
+	getDbox3 			= False		if 'getDbox3' not in kwargs else kwargs['getDbox3']
+	getStepsPerFrame	= False		if 'getStepsPerFrame' not in kwargs else kwargs['getStepsPerFrame']
+	report_every		= 1000		if 'report_every' not in kwargs else kwargs['report_every']
 
 	### notes
 	# assumes the bais array stores the base indices starting from 0.
@@ -69,9 +71,10 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 	while nba_total+3 < len(content) and ars.isnumber(content[nba_total+3].split()[0]):
 		nba_total += 1
 	dbox3 = np.array(content[1].split()[2:5],dtype=float)
-	dump_every = 0
 	if len(content) > nba_total+3:
-		dump_every = int(content[nba_total+3].split()[2]) - int(content[0].split()[2])
+		steps_per_frame = int(content[nba_total+3].split()[2]) - int(content[0].split()[2])
+	else:
+		steps_per_frame = 0
 	nstep_recorded = int(len(content)/(nba_total+3))
 	nstep_trimmed = int((nstep_recorded-nstep_skip)/coarse_time)
 	if nstep_trimmed <= 0:
@@ -80,17 +83,17 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 
 	### determine number of steps to use
 	if isinstance(nstep_max, str) and nstep_max == 'all':
-		nstep_used = nstep_trimmed
+		nstep_use = nstep_trimmed
 	elif ars.isinteger(nstep_max):
-		nstep_used = min([nstep_max,nstep_trimmed])
+		nstep_use = min([nstep_max,nstep_trimmed])
 	else:
 		print("Error: Cannot read oxDNA trajectory - max number of steps must be 'all' or integer.\n")
 		sys.exit()
 
 	### report step counts
-	print("{:1.2e} steps in simulation".format(nstep_recorded*dump_every))
-	print("{:1.2e} steps recorded".format(nstep_recorded))
-	print("{:1.2e} steps used".format(nstep_used))
+	print("{:1.2e} steps in simulation".format(nstep_recorded*steps_per_frame))
+	print("{:1.2e} steps in trajectory".format(nstep_recorded))
+	print("{:1.2e} steps for analysis".format(nstep_use))
 
 	### determine bases to use
 	if isinstance(bais, str) and bais == 'all':
@@ -117,14 +120,14 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 			sys.exit()
 
 	### count total number of bases to use
-	nba_used = 0
+	nba_use = 0
 	for i in range(len(bais)):
-		nba_used += len(bais[i])
+		nba_use += len(bais[i])
 
 	### extract the data
-	points = np.zeros((nstep_used,nba_used,3))
-	groups = np.zeros(nba_used, dtype=int)
-	for i in range(nstep_used):
+	points = np.zeros((nstep_use,nba_use,3))
+	groups = np.zeros(nba_use, dtype=int)
+	for i in range(nstep_use):
 		point_count = 0
 		for g in range(len(bais)):
 			for j in range(len(bais[g])):
@@ -181,7 +184,7 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 	output = [ points, dbox3[0] ]
 	if getDbox3: output[-1] = dbox3
 	if len(bais) > 1: output.append(groups)
-	if getUsedEvery: output.append(dump_every*coarse_time)
+	if getStepsPerFrame: output.append(steps_per_frame*coarse_time)
 	return output
 
 
@@ -189,10 +192,10 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 def readAtomDump(datFile, nstep_skip=0, coarse_time=1, bdis='all', coarse_points=1, nstep_max='all', **kwargs):
 	
 	### additional keyword args
-	ignorePBC		= False		if 'ignorePBC' not in kwargs else kwargs['ignorePBC']
-	getDbox3s		= False		if 'getDbox3s' not in kwargs else kwargs['getDbox3s']
-	getUsedEvery	= False		if 'getUsedEvery' not in kwargs else kwargs['getUsedEvery']
-	report_every	= 1000		if 'report_every' not in kwargs else kwargs['report_every']
+	ignorePBC			= False		if 'ignorePBC' not in kwargs else kwargs['ignorePBC']
+	getDbox3s			= False		if 'getDbox3s' not in kwargs else kwargs['getDbox3s']
+	getStepsPerFrame	= False		if 'getStepsPerFrame' not in kwargs else kwargs['getStepsPerFrame']
+	report_every		= 1000		if 'report_every' not in kwargs else kwargs['report_every']
 	
 	### notes
 	# assumes the bdis array stores the atom indices starting from 1.
@@ -211,9 +214,10 @@ def readAtomDump(datFile, nstep_skip=0, coarse_time=1, bdis='all', coarse_points
 
 	### extract metadata
 	nbd_total = int(content[3].split()[0])
-	dump_every = 0
 	if len(content) > nbd_total+10:
-		dump_every = int(content[nbd_total+10].split()[0]) - int(content[1].split()[0])
+		steps_per_frame = int(content[nbd_total+10].split()[0]) - int(content[1].split()[0])
+	else:
+		steps_per_frame = 0
 	nstep_recorded = int(len(content)/(nbd_total+9))
 	nstep_trimmed = int((nstep_recorded-nstep_skip-1)/coarse_time)+1
 	if nstep_trimmed <= 0:
@@ -222,17 +226,17 @@ def readAtomDump(datFile, nstep_skip=0, coarse_time=1, bdis='all', coarse_points
 
 	### interpret input
 	if isinstance(nstep_max, str) and nstep_max == 'all':
-		nstep_used = nstep_trimmed
+		nstep_use = nstep_trimmed
 	elif ars.isinteger(nstep_max):
-		nstep_used = min([nstep_max,nstep_trimmed])
+		nstep_use = min([nstep_max,nstep_trimmed])
 	else:
 		print("Error: Cannot read atom dump - max number of steps must be 'all' or integer.\n")
 		sys.exit()
 
 	### report step counts
-	print("{:1.2e} steps in simulation".format(nstep_recorded*dump_every))
-	print("{:1.2e} steps recorded".format(nstep_recorded))
-	print("{:1.2e} steps used".format(nstep_used))
+	print("{:1.2e} steps in simulation".format((nstep_recorded-1)*steps_per_frame))
+	print("{:1.2e} steps in trajectory".format(nstep_recorded))
+	print("{:1.2e} steps for analysis".format(nstep_use))
 
 	### interpret input
 	if isinstance(bdis, str) and bdis == 'all':
@@ -242,7 +246,7 @@ def readAtomDump(datFile, nstep_skip=0, coarse_time=1, bdis='all', coarse_points
 	elif ars.isinteger(bdis):
 		bdis = [[bdis]]
 	elif ars.isarray(bdis) and ars.isinteger(bdis[0]):
-		bdis = [bdis[::coare_points]]
+		bdis = [bdis[::coarse_points]]
 	elif ars.isarray(bdis) and ars.isarray(bdis[0]) and ars.isinteger(bdis[0][0]):
 		for i in range(len(bdis)):
 			bdis[i] = bdis[i][::coarse_points]
@@ -251,16 +255,16 @@ def readAtomDump(datFile, nstep_skip=0, coarse_time=1, bdis='all', coarse_points
 		sys.exit()
 
 	### count total number of beads to use
-	nbd_used = 0
+	nbd_use = 0
 	for i in range(len(bdis)):
-		nbd_used += len(bdis[i])
+		nbd_use += len(bdis[i])
 
 	### extract the data
-	points = np.zeros((nstep_used,nbd_used,3))
-	col2s = np.zeros(nbd_used, dtype=int)
-	groups = np.zeros(nbd_used, dtype=int)
-	dbox3s = np.zeros((nstep_used,3))
-	for i in range(nstep_used):
+	points = np.zeros((nstep_use,nbd_use,3))
+	col2s = np.zeros(nbd_use, dtype=int)
+	groups = np.zeros(nbd_use, dtype=int)
+	dbox3s = np.zeros((nstep_use,3))
+	for i in range(nstep_use):
 		point_count = 0
 		for k in range(3):
 			line = content[(nbd_total+9)*(nstep_skip+i*coarse_time)+5+k].split()
@@ -287,7 +291,7 @@ def readAtomDump(datFile, nstep_skip=0, coarse_time=1, bdis='all', coarse_points
 	output.append(dbox3s[0,0])
 	if getDbox3s: output[-1] = dbox3s
 	if len(bdis) > 1: output.append(groups)
-	if getUsedEvery: output.append(dump_every*coarse_time)
+	if getStepsPerFrame: output.append(steps_per_frame*coarse_time)
 	return output
 
 
@@ -304,6 +308,23 @@ def getNstep(datFile, nstep_skip=0, coarse_time=1):
 	nstep_recorded = int(len(content)/(nbd_total+9))
 	nstep_trimmed = int((nstep_recorded-nstep_skip-1)/coarse_time)+1
 	return nstep_trimmed
+
+
+### extract effective dump every from lammps-style trajectory
+def getStepsPerFrame(datFile, coarse_time=1):
+
+	### load trajectory file
+	ars.checkFileExist(datFile, "trajectory")
+	with open(datFile, 'r') as f:
+		content = f.readlines()
+
+	### extract dump frequency
+	nbd_total = int(content[3].split()[0])
+	if len(content) > nbd_total+10:
+		steps_per_frame = int(content[nbd_total+10].split()[0]) - int(content[1].split()[0])
+	else:
+		steps_per_frame = 0
+	return steps_per_frame*coarse_time
 
 
 ### read the given columns from a dump file
@@ -327,9 +348,9 @@ def readDump(dumpFile, nstep_skip=0, coarse_time=1, cols='all', nstep_max='all',
 	if cols == 'all':
 		cols = np.arange(ncol_dump,dtype=int)
 	elif ars.isinteger(cols) and cols < ncol_dump:
-		cols = np.asarry([cols])
+		cols = np.asarray([cols])
 	elif ars.isarray(cols) and ars.isinteger(cols[0]) and max(cols) < ncol_dump:
-		cols = np.asarry(cols)
+		cols = np.asarray(cols)
 	else:
 		print("Error: Cannot read dump - columns must be 'all', integer, or 1D integer array.")
 		sys.exit()
@@ -612,12 +633,12 @@ def readUSmeta(metaFile):
 		content = f.readlines()
 	content = ars.cleanFileContent(content)
 	nsim = len(content)-1
-	ops = np.zeros(nsim)
+	OPs_eq = np.zeros(nsim)
 	weights = np.zeros(nsim)
 	for i in range(nsim):
-		ops[i] = float(content[i+1].split()[0])
+		OPs_eq[i] = float(content[i+1].split()[0])
 		weights[i] = float(content[i+1].split()[1])
-	return ops, weights
+	return OPs_eq, weights
 
 
 ### read cluster file
@@ -699,6 +720,48 @@ def findArsReferences(searchFile=sys.argv[0], hush=False):
 
 ################################################################################
 ### File Writers
+
+### write lammps-style atom dump
+def writeAtomDump(outDatFile, dbox3s, points, col2s='auto', steps_per_frame=1, setColor=True):
+	nstep = points.shape[0]
+	npoint = points.shape[1]
+
+	### interpret input
+	if ars.isnumber(dbox3s):
+		dbox3s = np.ones((nstep,3))*dbox3s
+	elif ars.isarray(dbox3s) and ars.isnumber(dbox3s[0]) and len(dbox3s) == 3:
+		dbox3s = np.ones((nstep,3))*dbox3s
+	elif not ars.isarray(dbox3s) or len(dbox3s) != nstep or not ars.isarray(dbox3s[0]) or len(dbox3s[0]) != 3:
+		print("Error: Cannot center points - dbox3s must be number, nstep-element array, or nstep x 3 array.\n")
+		sys.exit()
+	if isinstance(col2s, str) and col2s == 'auto':
+		col2s = np.ones(npoint, dtype=int)
+
+	### count digits
+	len_npoint = len(str(npoint))
+	len_ncol2 = len(str(max(col2s)))
+
+	### write file
+	with open(outDatFile,'w') as f:
+		for i in range(nstep):
+			len_dbox = len(str(int(max(dbox3s[i])/2)))
+			f.write(f"ITEM: TIMESTEP\n{i*steps_per_frame}\n")
+			f.write(f"ITEM: NUMBER OF ATOMS\n{npoint}\n")
+			f.write(f"ITEM: BOX BOUNDS pp pp pp\n")
+			f.write(f"-{dbox3s[i,0]/2:<{len_dbox+3}.2f} {dbox3s[i,0]/2:<{len_dbox+3}.2f} xlo xhi\n")
+			f.write(f"-{dbox3s[i,1]/2:<{len_dbox+3}.2f} {dbox3s[i,1]/2:<{len_dbox+3}.2f} ylo yhi\n")
+			f.write(f"-{dbox3s[i,2]/2:<{len_dbox+3}.2f} {dbox3s[i,2]/2:<{len_dbox+3}.2f} zlo zhi\n")
+			if setColor:
+				f.write("ITEM: ATOMS id type xs ys zs\n")
+			else:
+				f.write("ITEM: ATOMS id mol xs ys zs\n")
+			for j in range(npoint):
+				f.write(f"{j+1:<{len_npoint}} " + \
+						f"{col2s[j]:<{len_ncol2}} " + \
+						f"{points[i,j,0]/dbox3s[i,0]+1/2:10.8f} " + \
+						f"{points[i,j,1]/dbox3s[i,1]+1/2:10.8f} " + \
+						f"{points[i,j,2]/dbox3s[i,2]+1/2:10.8f}\n")
+
 
 ### write lammps-style geometry
 def writeGeo(geoFile, dbox3, r, molecules='auto', types='auto', bonds=None, angles=None, **kwargs):
@@ -867,18 +930,18 @@ def writeGeo(geoFile, dbox3, r, molecules='auto', types='auto', bonds=None, angl
 		for i in range(natom):
 			f.write(f"\t{i+1:<{len_natom}}" + \
 					f" {int(molecules[i]):<{len_nmolecule}}" + \
-					f" {int(types[i]):<{len_natomType}}")
+					f" {int(types[i]):<{len_natomType}} ")
 			if includeCharge:
-				f.write(f" {charges[i]:>{len_q}.{q_precision}f}") 
-			f.write(f" {r[i,0]:>{len_x}.{x_precision}f}" + \
-					f" {r[i,1]:>{len_x}.{x_precision}f}" + \
-					f" {r[i,2]:>{len_x}.{x_precision}f}\n")
+				f.write(f"{charges[i]:>{len_q}.{q_precision}f}") 
+			f.write(f"{r[i,0]:>{len_x}.{x_precision}f} " + \
+					f"{r[i,1]:>{len_x}.{x_precision}f} " + \
+					f"{r[i,2]:>{len_x}.{x_precision}f}\n")
 
 		if nbond:
 			f.write("\nBonds\n\n")
 			for i in range(nbond):
 				f.write(f"\t{i+1:<{len_nbond}} " + \
-						f"{int(bonds[i,0]):<{len_nbondType}}  " + \
+						f"{int(bonds[i,0]):<{len_nbondType}} " + \
 						f"{int(bonds[i,1]):<{len_natom}} " + \
 						f"{int(bonds[i,2]):<{len_natom}}\n")
 
@@ -886,7 +949,7 @@ def writeGeo(geoFile, dbox3, r, molecules='auto', types='auto', bonds=None, angl
 			f.write("\nAngles\n\n")
 			for i in range(nangle):
 				f.write(f"\t{i+1:<{len_nangle}} " + \
-						f"{int(angles[i,0]):<{len_nangleType}}  " + \
+						f"{int(angles[i,0]):<{len_nangleType}} " + \
 						f"{int(angles[i,1]):<{len_natom}} " + \
 						f"{int(angles[i,2]):<{len_natom}} " + \
 						f"{int(angles[i,3]):<{len_natom}}\n")
@@ -924,7 +987,7 @@ def unpickle(pklFile, dims=None, hushExtraFlag=False):
 		### trim pickle array if too long
 		elif len(cucumber) > len(dims):
 			if not hushExtraFlag:
-				print("Flag: pickle array contained more elements than expected, ignoring some elements of the pickle array.")
+				print("Flag: pickle array contained more elements than expected, ignoring some elements.")
 			cucumber = cucumber[:len(dims)]
 
 		### check variables
@@ -1063,83 +1126,127 @@ def deployArsenal(srcFold=os.getcwd()+"/"):
 ### Plotting
 
 ### set pretty matplotlib defaults
-def magicPlot(pubReady=False):
+def magicPlot(pubReady=False, useTex=False, **kwargs):
+
+	### additional keyword args
+	font		= None	if 'font' not in kwargs else kwargs['font']
+	size		= (8,6)	if 'size' not in kwargs else kwargs['size']
+	autoBox		= False	if 'autoBox' not in kwargs else kwargs['autoBox']
+	shift_x		= 0		if 'shift_x' not in kwargs else kwargs['shift_x']
+	shift_y		= 0		if 'shift_y' not in kwargs else kwargs['shift_y']
+	
+	### determine font size
+	if not pubReady:
+		fontsize = 14
+	else:
+		fontsize = 18
+
+	### determine font
+	if font is None:
+		if not useTex:
+			font = 'Helvetica'
+		else:
+			font = 'Times'
 
 	### set default magic settings
 	params = {
-		'figure.figsize'	: '8,6',
-		'font.family'		: 'Times',
-		'text.usetex'		: True,
-		'errorbar.capsize'	: 3,
-		'lines.markersize'	: 6,
-		'legend.fontsize'	: 14,
-		'xtick.labelsize'	: 14,
-		'ytick.labelsize'	: 14,
-		'axes.labelsize'	: 14,
-		'axes.titlesize'	: 16,
-		'axes.axisbelow'	: True,
-		'grid.color'		: (0.5, 0.5, 0.5, 0.3)
+		'figure.figsize'		: size,
+		'font.family'			: font,
+		'text.usetex'			: useTex,
+		'lines.linewidth'		: 1.5,
+		'lines.markersize'		: 6,
+		'lines.markeredgecolor'	: 'none',
+		'errorbar.capsize'		: 3,
+		'legend.fontsize'		: fontsize,
+		'xtick.labelsize'		: fontsize,
+		'ytick.labelsize'		: fontsize,
+		'axes.labelsize'		: fontsize,
+		'axes.titlesize'		: fontsize+2,
+		'axes.axisbelow'		: True,
+		'grid.color'			: (0.5, 0.5, 0.5, 0.3)
 	}
 	plt.rcParams.update(params)
 
-	### set default magic settings
-	paramsPub = {
-		'figure.figsize'	: '8,6',
-		'font.family'		: 'Times',
-		'text.usetex'		: True,
-		'errorbar.capsize'	: 3,
-		'lines.markersize'	: 6,
-		'legend.fontsize'	: 20,
-		'xtick.labelsize'	: 20,
-		'ytick.labelsize'	: 20,
-		'axes.labelsize'	: 20,
-		'axes.titlesize'	: 24,
-		'axes.axisbelow'	: True,
-		'grid.color'		: (0.5, 0.5, 0.5, 0.3)
-	}
-
-	if not pubReady:
+	if not autoBox:
+		params = {
+			'figure.subplot.left'		: (0.125*8+shift_x)/size[0],
+			'figure.subplot.right'		: (0.9*8+shift_x)/size[0],
+			'figure.subplot.bottom'		: (0.1*6+shift_y)/size[1],
+			'figure.subplot.top'		: (0.9*6+shift_y)/size[1]
+		}
 		plt.rcParams.update(params)
-	else:
-		plt.rcParams.update(paramsPub)
 
+
+### set up figure
+def initFig(figLabel='auto', Xlabel=None, Ylabel=None, Xlim=None, Ylim=None, title=None, ax=None, figLabelAuto="Figure"):
+
+	### initialize figure
+	if ax is not None:
+		plt.sca(ax)
+		if figLabel != 'auto' and figLabel != figLabelAuto:
+			print("Warining: Unused figure label input.")
+	else:
+		if figLabel == 'auto':
+			plt.figure(figLabelAuto)
+		else:
+			plt.figure(figLabel)
+
+	### configure figure
+	if Xlim is not None:
+		plt.xlim(Xlim)
+	if Ylim is not None:
+		plt.ylim(Ylim)
+	if Xlabel is not None:
+		plt.xlabel(Xlabel)
+	if Ylabel is not None:
+		plt.ylabel(Ylabel)
+	if title is not None:
+		plt.title(title)
 
 
 ### plot the convergence of a varaible
-def plotConv(A, Alabel=None, title=None, figLabel='auto', Alim='auto', Xlim='auto', Xlabel='auto', dt_per_use='auto', **kwargs):
-
+def plotConv(A, figLabel='auto', Alabel=None, Alim='auto', title=None, **kwargs):
+	
 	### additional keyword args
-	ax = None if 'ax' not in kwargs else kwargs['ax']
+	Xlabel			= None		if 'Xlabel' not in kwargs else kwargs['Xlabel']
+	Xlim			= 'auto'	if 'Xlim' not in kwargs else kwargs['Xlim']
+	dt_per_frame 	= None 		if 'dt_per_frame' not in kwargs else kwargs['dt_per_frame']
+	plotAsLine		= False		if 'plotAsLine' not in kwargs else kwargs['plotAsLine']
+	ax 				= None 		if 'ax' not in kwargs else kwargs['ax']
 
 	### numpify data
 	A = np.asarray(A, dtype=float)
 
-	### interpret input
+	### process y-axis limits
 	if isinstance(Alim, str) and Alim == 'auto':
-		Amin = min(A)
-		Amax = max(A)
+		Amin = min(A); Amax = max(A)
 		Alim = [ Amin-(Amax-Amin)*0.6, Amax+(Amax-Amin)*0.4 ]
 	elif not ars.isarray(Alim) or len(Alim) != 2:
-		print("Flag: Skipping convergence plot - varaible limits must be either 'auto' or 2-element array.")
-		return
+		print("Flag: Not setting convergence plot y-axis limits - Alim must be either 'auto' or 2-element array.")
+		Alim = None
+
+	### process x-axis limits
 	if isinstance(Xlim, str) and Xlim == 'auto':
 		Xlim = [ 0, len(A)-1 ]
 	elif not ars.isarray(Xlim) or len(Xlim) != 2:
-		print("Flag: Skipping convergence plot - x-axis limits must be either 'auto' or 2-element array.")
+		print("Flag: Not setting convergence plot x-axis limits - Xlim must be either 'auto' or 2-element array.")
 		return
-	if isinstance(dt_per_use, str) and dt_per_use == 'auto':
+
+	### process x-axis label
+	if Xlabel == 'auto':
+		if dt_per_frame == 'auto':
+			Xlabel = "Time Step"
+		else:
+			Xlabel = "Time"
+
+	### process time step
+	if dt_per_frame is None:
 		time = np.arange(len(A))
-	elif ars.isnumber(dt_per_use):
-		time = np.arange(len(A))*dt_per_use
+	elif ars.isnumber(dt_per_frame):
+		time = np.arange(len(A))*dt_per_frame
 	else:
 		print("Flag: Skipping convergence plot - time step must be either 'auto' or number.")
 		return
-	if ax is not None:
-		if figLabel != 'auto' and figLabel is not None:
-			print("Warining: Unused figure label input.")
-			figLabel = None
-	elif figLabel == 'auto':
-		figLabel = "Conv"
 
 	### calculate mean and sem
 	avg = np.zeros(len(A))
@@ -1150,146 +1257,126 @@ def plotConv(A, Alabel=None, title=None, figLabel='auto', Alim='auto', Xlim='aut
 			sem[i] = ars.calcSEMautocorr(A[0:i+1], hush=True)
 
 	### initialize figure
-	if ax is not None:
-		plt.sca(ax)
-	else:
-		plt.figure(figLabel)
+	ars.initFig(figLabel, Xlabel, Alabel, Xlim, Alim, title, ax, "Conv")
 
-	### plot data, mean, sem
-	plt.scatter(time, A, color='green')
+	### plot data
+	if not plotAsLine:
+		plt.scatter(time, A, color='green')
+	else:
+		plt.plot(time, A, color='green')
+
+	### plot average
 	plt.plot(time, avg, color='purple')
 	plt.fill_between(time, avg+sem, avg-sem, color='purple', alpha=0.3, linewidth=0)
-	plt.xlim(Xlim)
-	plt.ylim(Alim)
-	if Xlabel == 'auto':
-		if dt_per_use == 'auto':
-			plt.xlabel("Time Step")
-		else:
-			plt.xlabel("Time")
-	elif Xlabel is not None:
-		plt.xlabel(Xlabel)
-	if Alabel is not None:
-		plt.ylabel(Alabel)
 	plt.legend(['Data','Mean','SEM'], loc='lower right')
-	if title is not None:
-		plt.title(title)
 
 
 ### plot a some nice points
-def plotPoints(X, Y, title=None, figLabel="Points", Xlim='auto', Ylim='auto', Xlabel=None, Ylabel=None, **kwargs):
+def plotPoints(X, Y, figLabel='auto', Xlabel=None, Ylabel=None, Xlim=None, Ylim=None, title=None, **kwargs):
 	
 	### additional keyword args
-	S			= None		if 'S' not in kwargs else kwargs['S']
-	marker		= 'o'		if 'marker' not in kwargs else kwargs['marker']
-	color		= 'black'	if 'color' not in kwargs else kwargs['color']
-	edgecolor	= None		if 'edgecolor' not in kwargs else kwargs['edgecolor']
-	alpha		= None		if 'alpha' not in kwargs else kwargs['alpha']
-	zorder		= None		if 'zorder' not in kwargs else kwargs['zorder']
-	label		= None		if 'label' not in kwargs else kwargs['label']
-	E			= None		if 'E' not in kwargs else kwargs['E']
-	ecolor		= None		if 'ecolor' not in kwargs else kwargs['ecolor']
-	ecapsize	= None		if 'ecapsize' not in kwargs else kwargs['ecapsize']
-	elinewidth	= None		if 'elinewidth' not in kwargs else kwargs['elinewidth']
-	ax			= None		if 'ax' not in kwargs else kwargs['ax']
+	S				= None		if 'S' not in kwargs else kwargs['S']
+	marker			= 'o'		if 'marker' not in kwargs else kwargs['marker']
+	color			= 'black'	if 'color' not in kwargs else kwargs['color']
+	edgecolor		= None		if 'edgecolor' not in kwargs else kwargs['edgecolor']
+	edgewidth		= 0			if 'edgewidth' not in kwargs else kwargs['edgewidth']
+	alpha			= None		if 'alpha' not in kwargs else kwargs['alpha']
+	zorder			= None		if 'zorder' not in kwargs else kwargs['zorder']
+	label			= None		if 'label' not in kwargs else kwargs['label']
+	E				= None		if 'E' not in kwargs else kwargs['E']
+	errcolor		= None		if 'errcolor' not in kwargs else kwargs['errcolor']
+	errcapsize		= None		if 'errcapsize' not in kwargs else kwargs['errcapsize']
+	errlinewidth	= None		if 'errlinewidth' not in kwargs else kwargs['errlinewidth']
+	ax				= None		if 'ax' not in kwargs else kwargs['ax']
 
-	### interpret input
-	if ax is not None:
-		if figLabel != 'auto' and figLabel is not None:
-			print("Warining: Unused figure label input.")
-			figLabel = None
-	elif figLabel == 'auto':
-		figLabel = "Points"
-
-	### initialize figure
-	if ax is not None:
-		plt.sca(ax)
-	else:
-		plt.figure(figLabel)
+	### numpify data
+	X = np.asarray(X, dtype=float)
+	Y = np.asarray(Y, dtype=float)
 
 	### adjust markersize for scatter
 	if S is not None:
+		S = np.asarray(S, dtype=float)
 		S = S**2 
+
+	### initialize figure
+	ars.initFig(figLabel, Xlabel, Ylabel, Xlim, Ylim, title, ax, "Points")
+
+	### plot points
+	plt.scatter(X, Y, S, marker=marker, color=color, edgecolor=edgecolor, linewidths=edgewidth, alpha=alpha, zorder=zorder, label=label)
+
+	### set auto errorbar color
+	if isinstance(errcolor, str) and errcolor == 'auto':
+		errcolor = color
 
 	### plot errorbars
 	if E is not None:
-		plt.errorbar(X, Y, E, fmt='none', ecolor=ecolor, capsize=ecapsize, linewidth=elinewidth, capthick=elinewidth)
-
-	### plot points
-	plt.scatter(X, Y, S, marker=marker, color=color, edgecolor=edgecolor, alpha=alpha, zorder=zorder, label=label)
-
-	### format
-	if Xlim != 'auto':
-		plt.xlim(Xlim)
-	if Ylim != 'auto':
-		plt.ylim(Ylim)
-	if Xlabel is not None:
-		plt.xlabel(Xlabel)
-	if Ylabel is not None:
-		plt.ylabel(Ylabel)
-	if title is not None:
-		plt.title(title)
+		plt.errorbar(X, Y, E, fmt='none', ecolor=errcolor, capsize=errcapsize, linewidth=errlinewidth, capthick=errlinewidth)
 
 
 ### plot a nice line
-def plotLine(X, Y, title=None, figLabel='auto', Xlim='auto', Ylim='auto', Xlabel=None, Ylabel=None, **kwargs):
+def plotLine(X, Y, figLabel='auto', Xlabel=None, Ylabel=None, Xlim=None, Ylim=None, title=None, **kwargs):
 
 	### additional keyword args
-	color		= None		if 'color' not in kwargs else kwargs['color']
-	linestyle	= '-'		if 'linestyle' not in kwargs else kwargs['linestyle']
-	marker		= None		if 'marker' not in kwargs else kwargs['marker']
-	markersize	= None		if 'markersize' not in kwargs else kwargs['markersize']
-	alpha		= None		if 'alpha' not in kwargs else kwargs['alpha']
-	zorder		= None		if 'zorder' not in kwargs else kwargs['zorder']
-	label		= None		if 'label' not in kwargs else kwargs['label']
-	E			= None		if 'E' not in kwargs else kwargs['E']
-	ecolor		= None		if 'ecolor' not in kwargs else kwargs['ecolor']
-	ecapsize	= None		if 'ecapsize' not in kwargs else kwargs['ecapsize']
-	elinewidth	= None		if 'elinewidth' not in kwargs else kwargs['elinewidth']
-	eshaded		= False		if 'eshaded' not in kwargs else kwargs['eshaded']
-	label		= None		if 'label' not in kwargs else kwargs['label']
-	ax			= None		if 'ax' not in kwargs else kwargs['ax']
+	color			= None		if 'color' not in kwargs else kwargs['color']
+	linestyle		= '-'		if 'linestyle' not in kwargs else kwargs['linestyle']
+	linewidth		= None		if 'linewidth' not in kwargs else kwargs['linewidth']
+	marker			= None		if 'marker' not in kwargs else kwargs['marker']
+	markersize		= None		if 'markersize' not in kwargs else kwargs['markersize']
+	markeredgewidth	= 'auto'	if 'markeredgewidth' not in kwargs else kwargs['markeredgewidth']
+	alpha			= None		if 'alpha' not in kwargs else kwargs['alpha']
+	zorder			= None		if 'zorder' not in kwargs else kwargs['zorder']
+	label			= None		if 'label' not in kwargs else kwargs['label']
+	E				= None		if 'E' not in kwargs else kwargs['E']
+	errcolor		= 'auto'	if 'errcolor' not in kwargs else kwargs['errcolor']
+	errcapsize		= None		if 'errcapsize' not in kwargs else kwargs['errcapsize']
+	errlinewidth	= None		if 'errlinewidth' not in kwargs else kwargs['errlinewidth']
+	shadeE			= False		if 'shadeE' not in kwargs else kwargs['shadeE']
+	label			= None		if 'label' not in kwargs else kwargs['label']
+	ax				= None		if 'ax' not in kwargs else kwargs['ax']
 
-	### interpret input
-	if ax is not None:
-		if figLabel != 'auto' and figLabel is not None:
-			print("Warining: Unused figure label input.")
-			figLabel = None
-	elif figLabel == 'auto':
-		figLabel = "Line"
+	### numpify data
+	A = np.asarray(X, dtype=float)
+	Y = np.asarray(Y, dtype=float)
+	E = np.asarray(E, dtype=float)
+
+	### process marker
+	if isinstance(markeredgewidth, str) and markeredgewidth == 'auto':
+		markeredgewidth = 0
+		markeredgecolor = None
+		markerfacecolor = color
+	elif ars.isnumber(markeredgewidth):
+		markeredgecolor = color
+		markerfacecolor = 'white'
+	else:
+		print("Flag: Skipping line plot - markeredgewidth must be 'auto' or number.")
+		return
 
 	### initialize figure
-	if ax is not None:
-		plt.sca(ax)
-	else:
-		plt.figure(figLabel)
-	
-	### plot errorbars
-	if E is not None:
-		if not eshaded:
-			plt.errorbar(X, Y, E, fmt='none', ecolor=ecolor, capsize=ecapsize, linewidth=elinewidth, capthick=elinewidth)
-		else:
-			plt.fill_between(X, Y-E, Y+E, color=ecolor, alpha=0.2, linewidth=0)
+	ars.initFig(figLabel, Xlabel, Ylabel, Xlim, Ylim, title, ax, "Line")
 
 	### plot line
-	plt.plot(X, Y, color=color, linestyle=linestyle, marker=marker, markersize=markersize, alpha=alpha, zorder=zorder,label=label)
+	line = plt.plot(X, Y, color=color, linestyle=linestyle, linewidth=linewidth, marker=marker, markersize=markersize, mew=markeredgewidth, mec=markeredgecolor, mfc=markerfacecolor, alpha=alpha, zorder=zorder,label=label)[0]
+	color = to_rgb(line.get_color())
 
-	### format
-	if Xlim != 'auto':
-		plt.xlim(Xlim)
-	if Ylim != 'auto':
-		plt.ylim(Ylim)
-	if Xlabel is not None:
-		plt.xlabel(Xlabel)
-	if Ylabel is not None:
-		plt.ylabel(Ylabel)
-	if title is not None:
-		plt.title(title)
+	### set auto errorbar color
+	if isinstance(errcolor, str) and errcolor == 'auto':
+		errcolor = color
+
+	### plot errorbars
+	if E is not None:
+		if not shadeE:
+			plt.errorbar(X, Y, E, fmt='none', ecolor=errcolor, capsize=errcapsize, linewidth=errlinewidth, capthick=errlinewidth)
+		else:
+			plt.fill_between(X, Y-E, Y+E, color=errcolor, alpha=0.2, linewidth=0)
 
 
-### plot means
-def plotDists(As, X=None, title=None, figLabel='auto', Xlim='auto', Ylim='auto', Xlabel=None, Ylabel=None, **kwargs):
+### plot distributions as points, violin, or box plots
+def plotDists(As, figLabel='auto', Alabel=None, Alim=None, title=None, **kwargs):
 
 	### additional keyword args
+	X				= None		if 'X' not in kwargs else kwargs['X']
+	Xlabel			= None		if 'Xlabel' not in kwargs else kwargs['Xlabel']
+	Xlim			= None		if 'Xlim' not in kwargs else kwargs['Xlim']
 	plotPoints		= 'auto'	if 'plotPoints' not in kwargs else kwargs['plotPoints']
 	plotViolin		= False		if 'plotViolin' not in kwargs else kwargs['plotViolin']
 	plotBox			= False		if 'plotBox' not in kwargs else kwargs['plotBox']
@@ -1316,24 +1403,13 @@ def plotDists(As, X=None, title=None, figLabel='auto', Xlim='auto', Ylim='auto',
 	if plotPoints and color is None:
 		color = 'purple'
 
-	### initialize figure
-	if ax is not None:
-		if figLabel != 'auto' and figLabel is not None:
-			print("Flag: Unused figure label input.")
-			figLabel = None
-	elif figLabel == 'auto':
-		figLabel = "Dists"
-
-	### initialize figure
-	if ax is not None:
-		plt.sca(ax)
-	else:
-		plt.figure(figLabel)
-
 	### transform into list of vectors
 	As = [ A for A in As ]
 	avgs = [ np.mean(A) for A in As ]
 	meds = [ np.median(A) for A in As ]
+
+	### initialize figure
+	ars.initFig(figLabel, Xlabel, Alabel, Xlim, Alim, title, ax, "Dists")
 
 	### point plot
 	if plotPoints:
@@ -1342,7 +1418,7 @@ def plotDists(As, X=None, title=None, figLabel='auto', Xlim='auto', Ylim='auto',
 		Xs = np.repeat(X, lens)
 		ars.plotPoints(Xs, As, color='black', alpha=pointalpha, figLabel=figLabel)
 		if plotAvgs:
-			ars.plotPoints(X, avgs, S=12, E=stds, ecapsize=6, elinewidth=2, ecolor=color, figLabel=figLabel)
+			ars.plotPoints(X, avgs, S=12, E=stds, errcapsize=6, errlinewidth=2, errcolor=color, figLabel=figLabel)
 		if plotMeds:
 			ars.plotPoints(X, meds, S=12, figLabel=figLabel)
 
@@ -1391,23 +1467,14 @@ def plotDists(As, X=None, title=None, figLabel='auto', Xlim='auto', Ylim='auto',
 				capprops=dict(color=edgecolor, alpha=edgealpha),
 				flierprops=dict(color=edgecolor, alpha=flieralpha))
 
-	### format
-	if Xlim != 'auto':
-		plt.xlim(Xlim)
-	if Ylim != 'auto':
-		plt.ylim(Ylim)
-	if Xlabel is not None:
-		plt.xlabel(Xlabel)
-	if Ylabel is not None:
-		plt.ylabel(Ylabel)
-	if title is not None:
-		plt.title(title)
-
 
 ### plot a nice histogram
-def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin='auto', Alim_plot='auto', Ylabel='auto', useDensity=False, rng=np.random, **kwargs):
+def plotHist(A, figLabel='auto', Alabel=None, nbin='auto', Alim_bin='auto', Alim_plot='auto', title=None, **kwargs):
 
 	### additional keyword args
+	useDensity		= False		if 'useDensity' not in kwargs else kwargs['useDenstiy']
+	Ylabel			= 'auto'	if 'Ylabel' not in kwargs else kwargs['Ylabel']
+	Ylim			= 'auto'	if 'Ylim' not in kwargs else kwargs['Ylim']
 	weights			= None		if 'weights' not in kwargs else kwargs['weights']
 	assumeIID		= False		if 'assumeIID' not in kwargs else kwargs['assumeIID']
 	plotBins		= True		if 'plotBins' not in kwargs else kwargs['plotBins']
@@ -1420,7 +1487,6 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 	edgecolor		= 'auto'	if 'edgecolor' not in kwargs else kwargs['edgecolor']
 	alpha			= 0.6		if 'alpha' not in kwargs else kwargs['alpha']
 	edgealpha		= 1			if 'edgealpha' not in kwargs else kwargs['edgealpha']
-	solidify		= False		if 'solidify' not in kwargs else kwargs['solidify']
 	label			= None		if 'label' not in kwargs else kwargs['label']
 	gauss_label		= 'auto'	if 'gauss_label' not in kwargs else kwargs['gauss_label']
 	gauss_color		= 'match'	if 'gauss_color' not in kwargs else kwargs['gauss_color']
@@ -1433,8 +1499,9 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 	plotGaussErr	= False		if 'plotGaussErr' not in kwargs else kwargs['plotGaussErr']
 	plotNormErr		= False		if 'plotNormErr' not in kwargs else kwargs['plotNormErr']
 	plotLogNormErr	= False		if 'plotLogNormErr' not in kwargs else kwargs['plotLogNormErr']
-	sigma_ci		= 1			if 'sigma_ci' not in kwargs else kwargs['sigma_ci']
-	ecolor			= 'auto'	if 'ecolor' not in kwargs else kwargs['ecolor']
+	rng				= 'auto'	if 'rng' not in kwargs else kwargs['rng']
+	sigma_CI		= 1			if 'sigma_CI' not in kwargs else kwargs['sigma_CI']
+	errcolor		= 'auto'	if 'errcolor' not in kwargs else kwargs['errcolor']
 	plotAvg			= False		if 'plotAvg' not in kwargs else kwargs['plotAvg']
 	plotMed			= False		if 'plotMed' not in kwargs else kwargs['plotMed']
 	plotStd			= False		if 'plotStd' not in kwargs else kwargs['plotStd']
@@ -1465,7 +1532,7 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 	if weights is not None and any(weights<0):
 		print("Warning: Skipping histogram plot - weights must be non-negative.")
 		return
-	if sigma_ci <= 0:
+	if sigma_CI <= 0:
 		print("Flag: Skipping histogram plot - confidence interval sigma must be positive.")
 		return
 	if (plotErrSR or plotErrBS) and not plotData:
@@ -1505,18 +1572,25 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 		if Alim_plot is not None:
 			print("Flag: Skipping histogram plot - variable limits must be None, 'auto', or 2-element array.")
 			return
+	if isinstance(Ylabel, str) and Ylabel == 'auto':
+		if useDensity:
+			Ylabel = "Density"
+		else:
+			Ylabel = "Count"
+	if isinstance(Ylim, str) and Ylim == 'auto':
+		Ylim = [0,0]
+	elif ars.isnumber(Ylim):
+		Ylim = [0,Ylim]
+	elif not ars.isarray(Ylim) or len(Ylim) != 2:
+		print("Flag: Skipping histogram plot - axis limits must be either 'auto', number, or 2-element array.")
 	if isinstance(edgecolor, str) and edgecolor == 'auto':
 		edgecolor = 'black'
 		if plotSteps or plotLine or plotGauss or plotNorm or plotLogNorm:
 			edgecolor = None
-	if isinstance(ecolor, str) and ecolor == 'auto':
-		ecolor = edgecolor if edgecolor is not None else color
-	if ax is not None:
-		if figLabel != 'auto' and figLabel is not None:
-			print("Flag: Unused figure label input.")
-			figLabel = None
-	elif figLabel == 'auto':
-		figLabel = "Hist"
+	if isinstance(errcolor, str) and errcolor == 'auto':
+		errcolor = edgecolor if edgecolor is not None else color
+	if isinstance(rng, str) and rng == 'auto':
+		rng = np.random
 
 	### check for unused labels
 	if not plotGauss:
@@ -1565,15 +1639,15 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 	if avg_label == 'auto':
 		avg_label = f"$\\mu$"
 	elif avg_label is not None:
-		avg_label = "$\\mu_{\\textrm{" + f"{avg_label}" + "}}$"
+		avg_label = "$\\mu_{\\mathrm{" + f"{avg_label}" + "}}$"
 	if med_label == 'auto':
 		med_label = f"$M$"
 	elif med_label is not None:
-		med_label = "$M_{\\textrm{" + f"{med_label}" + "}}$"
+		med_label = "$M_{\\mathrm{" + f"{med_label}" + "}}$"
 	if std_label == 'auto':
 		std_label = f"$\\sigma$"
 	elif std_label is not None:
-		std_label = "$\\sigma_{\\textrm{" + f"{std_label}" + "}}$"
+		std_label = "$\\sigma_{\\mathrm{" + f"{std_label}" + "}}$"
 
 	### determine whether plotting legend
 	legend = False
@@ -1619,21 +1693,20 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 	### fit parameters
 	npoint_fit = 100
 	nbootstrap = 1000
-	percentile_lower = norm.cdf(-sigma_ci)*100
-	percentile_upper = norm.cdf(sigma_ci)*100
-
-	### initialize figure
-	if ax is not None:
-		plt.sca(ax)
-	else:
-		plt.figure(figLabel)
+	percentile_lower = norm.cdf(-sigma_CI)*100
+	percentile_upper = norm.cdf(sigma_CI)*100
 
 	### initialize label flag
 	isDataLabeled = True if label is None else False
 
-	### plot solid bin background
-	if (plotBins or plotSteps) and solidify:
-		plt.bar(centers, heights/scale, width_bin, color='white')
+	### initialize figure
+	ars.initFig(figLabel, Alabel, Ylabel, Alim_plot, None, title, ax, "Hist")
+
+	### set y-axis limits
+	if ylim is not None:
+		plt.ylim(bottom=Ylim[0])
+		if Ylim[1] != 0:
+			plt.ylim(top=Ylim[1])
 
 	### plot data as bins
 	if plotBins:
@@ -1646,7 +1719,7 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 
 	### plot data as steps
 	if plotSteps:
-		bars = plt.hist(A, nbin, weights=weights, range=Alim_bin, color=color, linewidth=2, histtype='step')[2]
+		bars = plt.hist(A, nbin, weights=weights, range=Alim_bin, density=useDensity, color=color, linewidth=2, histtype='step')[2]
 		color = to_rgb(bars[0].get_edgecolor())
 		if not isDataLabeled:
 			bars[0].set_label(label)
@@ -1654,7 +1727,7 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 
 	### plot data as line
 	if plotLine:
-		line = plt.plot(centers, heights, color=color, linewidth=2)[0]
+		line = plt.plot(centers, heights/scale, color=color, linewidth=2)[0]
 		color = to_rgb(line.get_color())
 		if not isDataLabeled:
 			line.set_label(label)
@@ -1663,7 +1736,7 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 	### square root error bars on data
 	if plotErrSR:
 		Y_err = np.sqrt(tau_int*heights)
-		plt.errorbar(centers, heights/scale, Y_err/scale, fmt='none', linewidth=1, color=ecolor, alpha=alpha)
+		plt.errorbar(centers, heights/scale, Y_err/scale, fmt='none', linewidth=1, color=errcolor, alpha=alpha)
 
 	### bootstrap error bars on data
 	if plotErrBS:
@@ -1676,7 +1749,7 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 		heights_upper = np.percentile(boot, percentile_upper, axis=0)
 		heights_err = np.vstack((heights-heights_lower, heights_upper-heights))
 		heights_err *= np.sqrt(tau_int)
-		plt.errorbar(centers, heights/scale, heights_err/scale, fmt='none', linewidth=1, color=ecolor, alpha=alpha)
+		plt.errorbar(centers, heights/scale, heights_err/scale, fmt='none', linewidth=1, color=errcolor, alpha=alpha)
 
 	### gaussian kernel-density estimate
 	if plotGauss:
@@ -1808,30 +1881,17 @@ def plotHist(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin=
 		if std_label is not None:
 			line.set_label(f"{std_label} = {std:0.2f}")
 
-	### formatting
-	plt.ylim(bottom=0, auto=True)
-	if Alim_plot is not None:
-		plt.xlim(Alim_plot)
-	if Alabel is not None:
-		plt.xlabel(Alabel)
-	if Ylabel == 'auto':
-		if useDensity:
-			plt.ylabel("Density")
-		else:
-			plt.ylabel("Count")
-	elif Ylabel is not None:
-		plt.ylabel(Ylabel)
-	if title is not None:
-		plt.title(title)
+	### create legend
 	if legend:
 		plt.legend()
 
 
 ### plot a nice 2D histogram
-def plotHist2D(A, B, Alabel=None, Blabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin='auto', Blim_bin='auto', Alim_plot='auto', Blim_plot='auto', useDensity=False, **kwargs):
+def plotHist2D(A, B, figLabel='auto', Alabel=None, Blabel=None, nbin='auto', Alim_bin='auto', Blim_bin='auto', Alim_plot='auto', Blim_plot='auto', title=None, **kwargs):
 
 	### additional keyword args
-	ax = None if 'ax' not in kwargs else kwargs['ax']
+	useDensity	= False		if 'useDensity' not in kwargs else kwargs['useDensity']
+	ax			= None		if 'ax' not in kwargs else kwargs['ax']
 
 	### clean data
 	A = np.asarray(A, dtype=float)
@@ -1867,35 +1927,16 @@ def plotHist2D(A, B, Alabel=None, Blabel=None, title=None, figLabel='auto', nbin
 		if Blim_plot is not None:
 			print("Flag: Skipping histogram plot - variable limits must be None, 'auto', or 2-element array.")
 			return
-	if ax is not None:
-		if figLabel != 'auto' and figLabel is not None:
-			print("Warining: Unused figure label input.")
-			figLabel = None
-	elif figLabel == 'auto':
-		figLabel = "Hist2D"
 
 	### initialize figure
-	if ax is not None:
-		plt.sca(ax)
-	else:
-		plt.figure(figLabel)
+	ars.initFig(figLabel, Alabel, Blabel, Alim_plot, Blim_plot, title, ax, "Hist2D")
 
 	### plot histogram
 	plt.hist2d(A, B, nbin, range=[Alim_bin,Blim_bin], density=useDensity)
-	if Alim_plot is not None:
-		plt.xlim(Alim_plot)
-	if Blim_plot is not None:
-		plt.ylim(Blim_plot)
-	if Alabel is not None:
-		plt.xlabel(Alabel)
-	if Blabel is not None:
-		plt.ylabel(Blabel)
-	if title is not None:
-		plt.title(title)
 
 
 ### calculate and plot PMF from histogram
-def plotPMF(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin='auto', Alim_plot='auto', **kwargs):
+def plotPMF(A, figLabel='auto', Alabel=None, nbin='auto', Alim_bin='auto', Alim_plot='auto', title=None, **kwargs):
 
 	### additional keyword args
 	zero	= 'min'		if 'zero' not in kwargs else kwargs['zero']
@@ -1923,12 +1964,6 @@ def plotPMF(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin='
 	if zero != 'min' and zero != 'max':
 		print("Error: Cannot calculate PMF - zero must be either 'min' or 'max'.\n")
 		sys.exit()
-	if ax is not None:
-		if figLabel != 'auto' and figLabel is not None:
-			print("Warining: Unused figure label input.")
-			figLabel = None
-	elif figLabel == 'auto':
-		figLabel = "PMF"
 
 	### calcualte PMF
 	counts, bin_edges = np.histogram(A, nbin, range=Alim_bin)
@@ -1944,50 +1979,41 @@ def plotPMF(A, Alabel=None, title=None, figLabel='auto', nbin='auto', Alim_bin='
 		PMF -= np.nanmax(PMF)
 
 	### initialize figure
-	if ax is not None:
-		plt.sca(ax)
-	else:
-		plt.figure(figLabel)
+	ars.initFig(figLabel, Alabel, "PMF [kT]", Alim_plot, None, title, ax, "PMF")
 
 	### plot PMF
 	plt.plot(bins, PMF, '-o', color=color)
-	if Alim_plot is not None:
-		plt.xlim(Alim_plot)
-	if Alabel is not None:
-		plt.xlabel(Alabel)
-	plt.ylabel("PMF [kT]")
-	if title is not None:
-		plt.title(title)
+
+	### result
 	return bins, PMF
 
 
 ### plot umbrella sampling histograms and PMF
-def plotUS(ops_eq, weights, ops_ts, ops_wham, PMF, PMF_err, opLabel="Order Parameter", titlePrefix=None, figLabelPrefix=None, nbin='auto', **kwargs):
+def plotUS(OPs_eq, weights, OPs_ts, OPs_wham, PMF, PMF_err, nbin='auto', OPlabel="Order Parameter", figLabelPrefix=None, titlePrefix=None, **kwargs):
 
 	### additional keyword args
-	insideLegend		= False		if 'insideLegend' not in kwargs else kwargs['insideLegend']
-	op_precision		= 1			if 'op_precision' not in kwargs else kwargs['op_precision']
-	weight_precision	= 1			if 'weight_precision' not in kwargs else kwargs['weight_precision']
 	useOxUnits			= False		if 'useOxUnits' not in kwargs else kwargs['useOxUnits']
-	setFigSize			= True		if 'setFigSize' not in kwargs else kwargs['setFigSize']
+	insideLegend		= False		if 'insideLegend' not in kwargs else kwargs['insideLegend']
+	OP_precision		= 1			if 'OP_precision' not in kwargs else kwargs['OP_precision']
+	weight_precision	= 1			if 'weight_precision' not in kwargs else kwargs['weight_precision']
 
 	### interpret input
-	auto_bin = False
+	autoBin = False
 	if isinstance(nbin, str) and nbin == 'auto':
-		auto_bin = True
+		autoBin = True
 	elif not ars.isinteger(nbin):
 		print("Flag: Skipping US plot - number of histogram bins must be either 'auto' or integer.")
 		return
 
 	### adjust to oxDNA units (assuming nm and kcal)
 	if useOxUnits:
-		ops_eq *= 1/0.8518
+		OPs_eq *= 1/0.8518
 		weights *= 1/8.2
-		ops_ts = [i/0.8518 for i in ops_ts]
-		ops_wham *= 1/0.8518
+		OPs_ts = [i/0.8518 for i in OPs_ts]
+		OPs_wham *= 1/0.8518
 
 	### preparations
-	nsim = len(ops_eq)
+	nsim = len(OPs_eq)
 	titleHist = "US Histograms"
 	titlePMF = "Free Energy"
 	if titlePrefix is not None:
@@ -2000,20 +2026,14 @@ def plotUS(ops_eq, weights, ops_ts, ops_wham, PMF, PMF_err, opLabel="Order Param
 		figLabelPMF = f"{figLabelPrefix} {figLabelPMF}"
 
 	### plot nice histograms
-	if setFigSize:
-		plt.figure(figLabelHist, figsize=(10,6))
-	else:
-		plt.figure(figLabelHist)
-	ax = plt.subplot(111)
-	box = ax.get_position()
-	ax.set_position([ box.x0, box.y0, box.width*0.8, box.height ])
+	plt.figure(figLabelHist)
 	for i in range(nsim):
-		if auto_bin == True:
-			nbin = ars.optbins(ops_ts[i], 50)
-		label = f"$OP={ops_eq[i]:0.{op_precision}f}$, $w={weights[i]:0.{weight_precision}f}$"
-		ars.plotHist(ops_ts[i], figLabel=figLabelHist, nbin=nbin, Alim_plot=None, alpha=0.4, useDensity=True, plotGauss=True, label=label)
-	plt.xlabel(opLabel)
-	plt.ylabel('Density')
+		if autoBin == True:
+			nbin = ars.optbins(OPs_ts[i], 50)
+		label = f"$OP={OPs_eq[i]:0.{OP_precision}f}$, $w={weights[i]:0.{weight_precision}f}$"
+		ars.plotHist(OPs_ts[i], figLabel=figLabelHist, nbin=nbin, Alim_plot=None, alpha=0.4, useDensity=True, plotGauss=True, label=label)
+	plt.xlabel(OPlabel)
+	plt.ylabel("Density")
 	if insideLegend:
 		plt.legend(loc='best')
 	else:
@@ -2021,21 +2041,16 @@ def plotUS(ops_eq, weights, ops_ts, ops_wham, PMF, PMF_err, opLabel="Order Param
 	plt.title(titleHist)
 
 	### plot PMF
-	if setFigSize:
-		plt.figure(figLabelPMF, figsize=(10,6))
-	else:
-		plt.figure(figLabelPMF)
-	ax = plt.subplot(111)
-	box = ax.get_position()
-	ax.set_position([ box.x0, box.y0, box.width*0.8, box.height ])
-	plt.errorbar(ops_wham, PMF, PMF_err, color='purple')
-	plt.xlabel(opLabel)
+	plt.figure(figLabelPMF)
+	plt.errorbar(OPs_wham, PMF, PMF_err, color='purple')
+	plt.xlabel(OPlabel)
 	plt.ylabel('PMF [kcal/mol]')
 	plt.title(titlePMF)
 
 
 ### calculate and plot mean squared displacement
-def plotMSD(points, dbox3, dt_per_use, xLabel=None, yLabel=None, title=None, figLabel="MSD", nbin=10):
+# def plotMSD(points, dbox3, dt_per_frame, Xlabel=None, Ylabel=None, title=None, figLabel="MSD", nbin=10):
+def plotMSD(points, dbox3, dt_per_frame, nbin=10, figLabel="MSD", Xlabel=None, Ylabel=None, title=None):
 
 	### define center of mass function
 	if len(points.shape) == 2:
@@ -2051,7 +2066,7 @@ def plotMSD(points, dbox3, dt_per_use, xLabel=None, yLabel=None, title=None, fig
 	if nstep_bin < 2:
 		print("Error: Cannot calculate MSD - too few steps per MSD bin.\n")
 		sys.exit()
-	time = np.linspace(0, (nstep_bin-1)*dt_per_use, nstep_bin)
+	time = np.linspace(0, (nstep_bin-1)*dt_per_frame, nstep_bin)
 	dis2 = np.zeros((nstep_bin, nbin))
 	for q in range(nbin):
 		com0 = getCOM(points[q*nstep_bin])
@@ -2072,8 +2087,8 @@ def plotMSD(points, dbox3, dt_per_use, xLabel=None, yLabel=None, title=None, fig
 	plt.plot(time, slope*time)
 	for q in range(min(nbin,10)):
 		plt.plot(time, dis2[:,q], 'black', alpha=0.2)
-	plt.xlabel(xLabel)
-	plt.ylabel(yLabel)
+	plt.xlabel(Xlabel)
+	plt.ylabel(Ylabel)
 	plt.legend(["Simulation","Linear Fit"], loc='upper left')
 	plt.title(title)
 	return D
@@ -2102,7 +2117,7 @@ def plotBondWrite(bondWriteFile):
 				forces.append(float(values[3]))
 
 	### plot setup
-	fig, ax1 = plt.subplots(figsize=(8,6))
+	fig, ax1 = plt.subplots()
 	ax2 = ax1.twinx()
 	plt.title('Tabulated Bond')
 
@@ -2124,7 +2139,7 @@ def plotBondWrite(bondWriteFile):
 ### Calculations
 
 ### use wham to calculate PMF
-def calcPMF(ops, weights, op_ts, tsFold, nbin, bin_padding, whamMetaFile, whamOutFile):
+def calcPMF(OPs_eq, weights, OPs_ts, tsFold, nbin, bin_padding, whamMetaFile, whamOutFile):
 
 	### notes
 	# the weights need to be in kcal/mol*{op unit}^2.
@@ -2136,23 +2151,24 @@ def calcPMF(ops, weights, op_ts, tsFold, nbin, bin_padding, whamMetaFile, whamOu
 
 	### loop over simulations
 	print("Writing timeseries...")
-	nsim = len(ops)
+	nsim = len(OPs_eq)
 	for i in range(nsim):
-		nstep = op_ts[i].shape[0]
+		nstep = OPs_ts[i].shape[0]
 
 		### write sep timeseries file
-		tsFile = tsFold + f"ts_sim{i:02.0f}"
+		tsFile = tsFold + f"ts_sim{i:02}.txt"
 		with open(tsFile, 'w') as f:
 			for j in range(nstep):
-				f.write(f"{j}\t{op_ts[i][j]}\n")
+				f.write(f"{j} {OPs_ts[i][j]}\n")
 
 	### write wham metadata file
 	print("Writing wham metadata...")
+	print(whamMetaFile)
 	with open(whamMetaFile, 'w') as f:
 		for i in range(nsim):
-			tsFile = tsFold + f"ts_sim{i:02.0f}"
-			tau_int = 1 + 2*ars.calcCorrTime(op_ts[i])
-			f.write(tsFile + f"\t{ops[i]}\t{weights[i]}\t{tau_int}\n")
+			tsFile = tsFold + f"ts_sim{i:02}.txt"
+			tau_int = 1 + 2*ars.calcCorrTime(OPs_ts[i])
+			f.write(f"{tsFile} {OPs_eq[i]} {weights[i]} {tau_int:.2f}\n")
 
 	### wham parameters (not expected to change)
 	T_wham = 300
@@ -2160,8 +2176,8 @@ def calcPMF(ops, weights, op_ts, tsFold, nbin, bin_padding, whamMetaFile, whamOu
 	ntrial_MC_wham = 10
 
 	### set wham bin limits
-	bin_min = min(ops)-bin_padding
-	bin_max = max(ops)+bin_padding
+	bin_min = round(min(OPs_eq)-bin_padding,8)
+	bin_max = round(max(OPs_eq)+bin_padding,8)
 
 	### run wham (from Grossfield)
 	print("Running wham...\n")
@@ -2169,12 +2185,12 @@ def calcPMF(ops, weights, op_ts, tsFold, nbin, bin_padding, whamMetaFile, whamOu
 	print("")
 
 	### read wham output, return
-	bins, PMF, PMF_err = ars.readWham(whamOutFile, nbin)
-	return bins, PMF, PMF_err
+	OPs_wham, PMF, PMF_err = ars.readWham(whamOutFile, nbin)
+	return OPs_wham, PMF, PMF_err
 
 
 ### shift trajectory, placing the given point at the center, optionally unwrapping molecules at boundary
-def centerPointsMolecule(points, molecules, dbox3s, center=1, unwrap=True, report_every=100):
+def centerPointsMolecule(points, molecules, dbox3s, center=1, unwrap=True, report_every=1000):
 
 	### notes
 	# as the notation suggests, the indices contained in molecules must start at 1.
@@ -2189,7 +2205,7 @@ def centerPointsMolecule(points, molecules, dbox3s, center=1, unwrap=True, repor
 	### interpret input
 	if ars.isnumber(dbox3s):
 		dbox3s = np.ones(nstep)*dbox3s
-	if ars.isarray(dbox3s) and ars.isnumber(dbox3s[0]) and len(dbox3s) == 3:
+	elif ars.isarray(dbox3s) and ars.isnumber(dbox3s[0]) and len(dbox3s) == 3:
 		dbox3s = np.ones((nstep,3))*dbox3s
 	elif not ars.isarray(dbox3s) or len(dbox3s) != nstep or not ars.isarray(dbox3s[0]) or len(dbox3s[0]) != 3:
 		print("Error: Cannot center points - dbox3s must be number, nstep-element array, or nstep x 3 array.\n")
@@ -2271,7 +2287,7 @@ def centerPointsBead(points, dbox3s):
 	### interpret input
 	if ars.isnumber(dbox3s):
 		dbox3s = np.ones(nstep)*dbox3s
-	if ars.isarray(dbox3s) and ars.isnumber(dbox3s[0]) and len(dbox3s) == 3:
+	elif ars.isarray(dbox3s) and ars.isnumber(dbox3s[0]) and len(dbox3s) == 3:
 		dbox3s = np.ones((nstep,3))*dbox3s
 	elif not ars.isarray(dbox3s) or len(dbox3s) != nstep or not ars.isarray(dbox3s[0]) or len(dbox3s[0]) != 3:
 		print("Error: Cannot center points - dbox3s must be number, nstep-element array, or nstep x 3 array.\n")
@@ -2318,11 +2334,11 @@ def unwrapChain(r, dbox3):
 
 
 ### align the principal components of the given points with coordinate axes
-def alignPCs(r, indices='all', axis_rank=[0,1,2], getPCs=False):
+def alignPCs(r, indices='all', axis_ranking=[0,1,2], getPCs=False):
 
 	### notes
 	# indices gives the points from which to center, calculate PCs, and rotate.
-	# axis rank gives the PC that each axis gets (in default, x-axis gets largest PC).
+	# axis_ranking gives the PC that each axis gets (in default, x-axis gets largest PC).
 	# as is standard, the positions array contains points in the first dimension and
 	  # coordinates in the second; in covariance terminology, this translates to 
 	  # observations in rows and variables in columns.
@@ -2344,7 +2360,7 @@ def alignPCs(r, indices='all', axis_rank=[0,1,2], getPCs=False):
 	cov = np.cov(r_centered[indices], rowvar=False)				
 	eigenvalues, eigenvectors = np.linalg.eigh(cov)
 	PCs_decreasing = eigenvectors[:,np.argsort(eigenvalues)[::-1]]
-	PCs_axisRanked = PCs_decreasing[:,axis_rank]
+	PCs_axisRanked = PCs_decreasing[:,axis_ranking]
 
 	### enforce right-handedness
 	if np.linalg.det(PCs_axisRanked) < 0:
@@ -2552,15 +2568,35 @@ def checkOverlap(r0, r_other, sigma, dbox3):
 	return np.any(np.linalg.norm(ars.applyPBC(r_other-r0, dbox3),axis=1) < sigma)
 
 
-### calculate moving average of an array
-def movingAvg(A, stride=1):
+### smooth evenly-spaced time series with moving average
+def movAvgFilter(A, stride=1):
 	if stride < 1:
 		print("Flag: Skipping moving average, stride must be positive integer.")
-	avg = np.convolve(A, np.ones(stride)/stride, mode='valid')
-	pad_left = (stride - 1) // 2
-	pad_right = stride // 2
-	return np.pad(avg, (pad_left,pad_right), mode='edge')
+		return A
+	kernel = np.ones(stride)
+	full = np.convolve(A, kernel, mode='full')
+	counts = np.convolve(np.ones(len(A)), kernel, mode='full')
+	center = (stride - 1) // 2
+	full = full[center : center + len(A)]
+	counts = counts[center : center + len(A)]
+	return full / counts
 
+
+### smooth evenly-spaced time series with Gaussian kernel
+def gaussFilter(A, sigma):
+	if sigma < 1:
+		print("Flag: Skipping Gaussian filter, sigma must be positive integer.")
+		return A
+	return gaussian_filter1d(A, sigma)
+
+
+### adjust number of points in evenly-spaced time series
+def resample(A, npoint):
+	t_in = np.arange(len(A))
+	t_out = np.linspace(t_in[0], t_in[-1], npoint)
+	A_out = np.interp(t_out, t_in, A)
+	coarse_time = (len(A)-1)/(npoint-1)
+	return A_out, coarse_time
 
 
 ################################################################################
@@ -2649,6 +2685,13 @@ def getColor(color):
 		sys.exit()
 
 
+### get softened version of color
+def soften(color, alpha):
+	rgb = np.array(to_rgb(color))
+	rgb_soft = alpha * rgb + (1 - alpha)
+	return tuple(rgb_soft)
+
+
 ### sort points into molecules
 def sortPointsByMolecule(points, molecules):
 	nstep = points.shape[0]
@@ -2733,6 +2776,14 @@ def compressArr(A):
 		return str(np.asarray(A))
 
 
+### clip and normalize between two values
+def clipNorm(x, a, b):
+	if b <= a:
+		print("Error: Upper clip limit must be greater than lower clip limit.")
+		sys.exit()
+	return np.clip((x - a) / (b - a), 0, 1)
+
+
 ### test if variable is numeric (both float and integer count)
 def isnumber(x):
 	try:
@@ -2750,8 +2801,10 @@ def isinteger(x):
 
 
 ### check if variable is an array (both list and numpy array count)
-def isarray(x):
+def isarray(x, includeTuple=True):
 	if isinstance(x, list) or isinstance(x, np.ndarray):
+		return True
+	elif includeTuple and isinstance(x, tuple):
 		return True
 	return False
 

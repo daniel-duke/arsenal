@@ -25,7 +25,7 @@ def main():
 	datFile = sys.argv[1]
 
 	### optional second argument
-	precision = 15
+	precision = 8
 	if len(sys.argv) > 2:
 		precision = int(sys.argv[2])
 		if precision > 15:
