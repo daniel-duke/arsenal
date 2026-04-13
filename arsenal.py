@@ -297,34 +297,37 @@ def readAtomDump(datFile, nstep_skip=0, coarse_time=1, bdis='all', coarse_points
 
 ### extract number of steps from lammps-style trajectory
 def getNstep(datFile, nstep_skip=0, coarse_time=1):
-
-	### load trajectory file
 	ars.checkFileExist(datFile, "trajectory")
 	with open(datFile, 'r') as f:
-		content = f.readlines()
-
-	### extract dump frequency
-	nbd_total = int(content[3].split()[0])
-	nstep_recorded = int(len(content)/(nbd_total+9))
-	nstep_trimmed = int((nstep_recorded-nstep_skip-1)/coarse_time)+1
+		for i, line in enumerate(f):
+			if i == 3:
+				nbd_total = int(line.split()[0])
+				break
+		nlines = i + 1 + sum(1 for _ in f)
+	nstep_recorded = int(nlines / (nbd_total + 9))
+	nstep_trimmed = int((nstep_recorded - nstep_skip - 1) / coarse_time) + 1
 	return nstep_trimmed
 
 
-### extract effective dump every from lammps-style trajectory
+### extract effective steps per frame from lammps-style trajectory
 def getStepsPerFrame(datFile, coarse_time=1):
-
-	### load trajectory file
 	ars.checkFileExist(datFile, "trajectory")
 	with open(datFile, 'r') as f:
-		content = f.readlines()
-
-	### extract dump frequency
-	nbd_total = int(content[3].split()[0])
-	if len(content) > nbd_total+10:
-		steps_per_frame = int(content[nbd_total+10].split()[0]) - int(content[1].split()[0])
+		target_lines = {1, 3}
+		values = {}
+		for i, line in enumerate(f):
+			if i in target_lines:
+				values[i] = int(line.split()[0])
+			if i == 3:
+				nbd_total = values[3]
+				target_lines.add(nbd_total + 10)
+			if i == nbd_total + 10:
+				break
+	if nbd_total + 10 in values:
+		steps_per_frame = values[nbd_total + 10] - values[1]
 	else:
 		steps_per_frame = 0
-	return steps_per_frame*coarse_time
+	return steps_per_frame * coarse_time
 
 
 ### read the given columns from a dump file
