@@ -2,7 +2,7 @@ import arsenal as ars
 import numpy as np
 import math
 import matplotlib.pyplot as plt
-from matplotlib.colors import to_rgb
+import matplotlib.colors as mcolors
 from scipy.stats import linregress
 from scipy.stats import gaussian_kde
 from scipy.stats import norm
@@ -46,9 +46,9 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 	ntFirstStrand 		= 'auto'	if 'ntFirstStrand' not in kwargs else kwargs['ntFirstStrand']
 	useHbondSite 		= False		if 'useHbondSite' not in kwargs else kwargs['useHbondSite']
 	ignorePBC 			= False		if 'ignorePBC' not in kwargs else kwargs['ignorePBC']
+	getAxes				= False		if 'getAxes' not in kwargs else kwargs['getAxes']
 	getDbox3 			= False		if 'getDbox3' not in kwargs else kwargs['getDbox3']
 	getStepsPerFrame	= False		if 'getStepsPerFrame' not in kwargs else kwargs['getStepsPerFrame']
-	report_every		= 1000		if 'report_every' not in kwargs else kwargs['report_every']
 
 	### notes
 	# assumes the bais array stores the base indices starting from 0.
@@ -56,27 +56,46 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 	# assumes the box diameter does not change, which it never should.
 	# unless instructed otherwise, returns only first dimension of box diameter.
 	# all three dimensions of the box are used to get the points.
-	# backbone bond checking assumes the the first ntFirstStrand nucleotides form a continous strand.
+	# backbone bond checking assumes the first ntFirstStrand nucleotides form a continous strand.
 	# backbond bond checking assumes all bases form one continuous strand if ntFirstStrand is set to auto.
-
-	### load trajectory file
-	print("Loading oxDNA trajectory...")
+	# backbone bond checking defaults to max separation of ~ 0.7564 + 0.25 (r_0_backbone + Delta_FENE for oxDNA2).
+	
+	### look for file
+	print("Reading oxDNA trajectory...")
 	ars.checkFileExist(datFile, "trajectory")
-	with open(datFile, 'r') as f:
-		content = f.readlines()
-	print("Parsing trajectory...")
+
+	### count lines
+	with open(datFile, 'rb') as f:
+		nline = sum(1 for _ in f)
 
 	### extract metadata
-	nba_total = 0
-	while nba_total+3 < len(content) and ars.isnumber(content[nba_total+3].split()[0]):
-		nba_total += 1
-	dbox3 = np.array(content[1].split()[2:5],dtype=float)
-	if len(content) > nba_total+3:
-		steps_per_frame = int(content[nba_total+3].split()[2]) - int(content[0].split()[2])
-	else:
+	with open(datFile, 'r') as f:
+
+		### read header
+		header = []
+		for i in range(3):
+			header.append(f.readline())
+
+		### check if first line looks like an oxDNA trajectory
+		if header[0][:4] != "t = ":
+			print("Error: First line of trajectory file doesn't match expected (oxDNA) format.")
+			sys.exit()
+
+		### parse first header
+		step_init = int(header[0].split()[2])
+		dbox3 = np.array(header[1].split()[2:5],dtype=float)
+
+		### look for next frame
 		steps_per_frame = 0
-	nstep_recorded = int(len(content)/(nba_total+3))
-	nstep_trimmed = int((nstep_recorded-nstep_skip)/coarse_time)
+		for nba_total,line in enumerate(f,start=1):
+			if line[0] == 't':
+				steps_per_frame = int(line.split()[2]) - step_init
+				nba_total -= 1
+				break
+
+	### count steps
+	nstep_recorded = nline // (nba_total+3)
+	nstep_trimmed = (nstep_recorded-nstep_skip) // coarse_time
 	if nstep_trimmed <= 0:
 		print("Error: Cannot read oxDNA trajectory - too much initial time cut off.\n")
 		sys.exit()
@@ -98,10 +117,8 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 	### determine bases to use
 	if isinstance(bais, str) and bais == 'all':
 		bais = [range(int(np.ceil(nba_total/coarse_points)))]
-	elif ars.isinteger(bais) and bais < 0:
-		bdis = [range(int(np.ceil(-bais/coarse_points)))]
 	elif ars.isinteger(bais):
-		bais = [[bais]]
+		bais = [range(int(np.ceil(bais/coarse_points)))]
 	elif ars.isarray(bais) and ars.isinteger(bais[0]):
 		bais = [bais[::coarse_points]]
 	elif ars.isarray(bais) and ars.isarray(bais[0]) and ars.isinteger(bais[0][0]):
@@ -113,9 +130,11 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 
 	### prepare for backbone bond checking
 	if checkBackbone:
+		r12_eq_max = 1
+		stretched_count = 0
 		if isinstance(ntFirstStrand, str) and ntFirstStrand == 'auto':
 			ntFirstStrand = nba_total
-		elif not ars.isinteger(ntFirstSrand):
+		elif not ars.isinteger(ntFirstStrand):
 			print("Error: Cannot read oxDNA trajectory - number of nucleotides in first strand must be 'auto' or integer.\n")
 			sys.exit()
 
@@ -124,58 +143,98 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 	for i in range(len(bais)):
 		nba_use += len(bais[i])
 
-	### extract the data
+	### initialize
 	points = np.zeros((nstep_use,nba_use,3))
 	groups = np.zeros(nba_use, dtype=int)
-	for i in range(nstep_use):
-		point_count = 0
-		for g in range(len(bais)):
-			for j in range(len(bais[g])):
-				bai = bais[g][j]
-				if bai >= nba_total:
-					print(f"Error: Cannot read oxDNA trajectory - requested base index {bai} exceeds the number of bases in the simulation ({nba_total}).\n")
-					sys.exit()
-				line = content[(nba_total+3)*(nstep_skip+i*coarse_time)+3+bai].split()
-				if i == 0:
-					groups[point_count] = g + 1
-				if not useHbondSite:
-					points[i,point_count] = np.array(line[:3],dtype=float)
-				else:
-					com = np.array(line[:3],dtype=float)
-					a1 = np.array(line[3:6],dtype=float)
-					points[i,point_count] = com + 0.4*a1
-				point_count += 1
-		if not ignorePBC:
-			points[i] = ars.applyPBC( points[i], dbox3 )
-		if (i+1)%report_every == 0:
-			print(f"processed {i+1} steps...")
+	axes = np.zeros((nstep_use,nba_use,3,3))
 
-		### check backbone bond lengths
-		if checkBackbone:
-			r12_eq_max = 0.7564 + 0.25		# for oxDNA2, r_0_backbone + Delta_FENE
-			stretched_count = 0
-			for bai in range(ntFirstStrand-1):
-				line_index = (nba_total+3)*(nstep_skip+i*coarse_time)+3+bai
-				line0 = content[line_index+0].split()
-				line1 = content[line_index+1].split()
-				com_bai0 = np.array(line0[:3],dtype=float)
-				com_bai1 = np.array(line1[:3],dtype=float)
-				a1_bai0  = np.array(line0[3:6],dtype=float)
-				a1_bai1  = np.array(line1[3:6],dtype=float)
-				a3_bai0  = np.array(line0[6:9],dtype=float)
-				a3_bai1  = np.array(line1[6:9],dtype=float)
-				a2_bai0 = np.cross(a3_bai0, a1_bai0)
-				a2_bai1 = np.cross(a3_bai1, a1_bai1)
-				bb_bai0 = com_bai0 - 0.34*a1_bai0 + 0.3408*a2_bai0		# for oxDNA2, from old documentation
-				bb_bai1 = com_bai1 - 0.34*a1_bai1 + 0.3408*a2_bai1		# for oxDNA2, from old documentation
-				r12_eq  = np.linalg.norm(bb_bai1-bb_bai0)
-				if r12_eq > r12_eq_max:
-					stretched_count += 1
+	### extract the data
+	ars.initStatusBar("Reading file")
+	with open(datFile, 'r') as f:
+
+		### loop over steps
+		si = 0
+		for i in range(nstep_recorded):
+
+			### read frame
+			content = [f.readline() for _ in range(nba_total+3)]
+
+			### skip unused steps
+			if i < nstep_skip or (i+1-nstep_skip)%coarse_time != 0:
+				continue
+
+			### loop over points
+			pi = 0
+			for g in range(len(bais)):
+				for j in range(len(bais[g])):
+					bai = bais[g][j]
+
+					### read line if valid
+					if bai < nba_total:
+						line = content[3+bai].split()
+					else:
+						print(f"Error: Cannot read oxDNA trajectory - requested base index {bai} exceeds the number of bases in the simulation ({nba_total}).\n")
+						sys.exit()
+
+					### set group
+					if si == 0:
+						groups[pi] = g + 1
+
+					### read values
+					com = np.array(line[:3],dtype=float)
+					if useHbondSite or getAxes:
+						a1 = np.array(line[3:6],dtype=float)
+					if getAxes:
+						a3 = np.array(line[6:9],dtype=float)
+						a2 = np.cross(a3,a1)
+
+					### store values
+					if not useHbondSite:
+						points[si,pi] = com
+					else:
+						points[si,pi] = com + 0.4*a1
+					if getAxes:
+						axes[si,pi] = [a1,a2,a3]
+
+					### increment
+					pi += 1
+
+			### periodic boundary
+			if not ignorePBC:
+				points[si] = ars.applyPBC( points[si], dbox3 )
+
+			### check backbone bond lengths
+			if checkBackbone:
+				for bai in range(ntFirstStrand-1):
+					line0 = content[3+bai+0].split()
+					line1 = content[3+bai+1].split()
+					com_bai0 = np.array(line0[:3],dtype=float)
+					com_bai1 = np.array(line1[:3],dtype=float)
+					a1_bai0  = np.array(line0[3:6],dtype=float)
+					a1_bai1  = np.array(line1[3:6],dtype=float)
+					a3_bai0  = np.array(line0[6:9],dtype=float)
+					a3_bai1  = np.array(line1[6:9],dtype=float)
+					a2_bai0 = np.cross(a3_bai0, a1_bai0)
+					a2_bai1 = np.cross(a3_bai1, a1_bai1)
+					bb_bai0 = com_bai0 - 0.34*a1_bai0 + 0.3408*a2_bai0
+					bb_bai1 = com_bai1 - 0.34*a1_bai1 + 0.3408*a2_bai1
+					r12_eq  = np.linalg.norm(bb_bai1-bb_bai0)
+					if r12_eq > r12_eq_max:
+						stretched_count += 1
+
+			### updates
+			ars.updateStatusBar(si,nstep_use)
+
+			### finish or increment
+			if si+1 == nstep_use:
+				break
+			else:
+				si += 1
 
 	### stretched backbone warning
 	if checkBackbone and stretched_count > 0:
 		print(f"Flag: Backbone bond exceeded max value {stretched_count} times.")
-	
+
 	### oxDNA units to nm
 	points *= 0.8518
 	dbox3 *= 0.8518
@@ -184,6 +243,7 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 	output = [ points, dbox3[0] ]
 	if getDbox3: output[-1] = dbox3
 	if len(bais) > 1: output.append(groups)
+	if getAxes: output.append(axes)
 	if getStepsPerFrame: output.append(steps_per_frame*coarse_time)
 	return output
 
@@ -193,9 +253,10 @@ def readAtomDump(datFile, nstep_skip=0, coarse_time=1, bdis='all', coarse_points
 	
 	### additional keyword args
 	ignorePBC			= False		if 'ignorePBC' not in kwargs else kwargs['ignorePBC']
+	getCol2s			= True		if 'getCol2s' not in kwargs else kwargs['getCol2s']
 	getDbox3s			= False		if 'getDbox3s' not in kwargs else kwargs['getDbox3s']
+	getQuats			= False		if 'getQuats' not in kwargs else kwargs['getQuats']
 	getStepsPerFrame	= False		if 'getStepsPerFrame' not in kwargs else kwargs['getStepsPerFrame']
-	report_every		= 1000		if 'report_every' not in kwargs else kwargs['report_every']
 	
 	### notes
 	# assumes the bdis array stores the atom indices starting from 1.
@@ -205,21 +266,60 @@ def readAtomDump(datFile, nstep_skip=0, coarse_time=1, bdis='all', coarse_points
 	# all three dimensions of the box are extracted each timestep and used to get the points.
 	# the returned points are centered about the origin, even if of the extracted values are not.
 
-	### load trajectory file
-	print("Loading LAMMPS-style trajectory...")
+	### check for file
+	print("Reading LAMMPS-style trajectory...")
 	ars.checkFileExist(datFile, "trajectory")
-	with open(datFile, 'r') as f:
-		content = f.readlines()
-	print("Parsing trajectory...")
 
-	### extract metadata
-	nbd_total = int(content[3].split()[0])
-	if len(content) > nbd_total+10:
-		steps_per_frame = int(content[nbd_total+10].split()[0]) - int(content[1].split()[0])
-	else:
+	### count lines
+	with open(datFile, 'rb') as f:
+		nline = sum(1 for _ in f)
+
+	### extract metadata from header
+	with open(datFile, 'r') as f:
+
+		### read header
+		header = []
+		for i in range(9):
+			header.append(f.readline())
+
+		### check if first line looks like a LAMMPS trajectory
+		if header[0][:14] != "ITEM: TIMESTEP":
+			print("Error: First line of trajectory file doesn't match expected (LAMMPS) format.")
+			sys.exit()
+
+		### parse header
+		step_init = int(header[1].split()[0])
+		nbd_total = int(header[3].split()[0])
+
+		### parse columns
+		col_x = None
+		col_quat = None
+		line = header[8].split()
+		for i in range(2,len(line)):
+			if line[i] == 'xs':
+				isScaled = True
+				col_x = i-2
+			elif line[i] == 'x':
+				isScaled = False
+				col_x = i-2
+			elif line[i] == 'c_quat[1]':
+				col_quat = i-2
+		if col_x is None:
+			print("Error: No position data found.")
+			sys.exit()
+		if getQuats and col_quat is None:
+			print("Error: No quaternion data found.")
+			sys.exit()
+
+		### look for next frame
 		steps_per_frame = 0
-	nstep_recorded = int(len(content)/(nbd_total+9))
-	nstep_trimmed = int((nstep_recorded-nstep_skip-1)/coarse_time)+1
+		for i in range(nbd_total+2):
+			line = f.readline()
+		if line: steps_per_frame = int(line.split()[0]) - step_init
+
+	### count steps
+	nstep_recorded = nline // (nbd_total+9)
+	nstep_trimmed = (nstep_recorded-nstep_skip-1) // coarse_time + 1
 	if nstep_trimmed <= 0:
 		print("Error: Cannot read atom dump - too much initial time cut off.\n")
 		sys.exit()
@@ -241,10 +341,8 @@ def readAtomDump(datFile, nstep_skip=0, coarse_time=1, bdis='all', coarse_points
 	### interpret input
 	if isinstance(bdis, str) and bdis == 'all':
 		bdis = [list(range(1,int(np.ceil(nbd_total/coarse_points))+1))]
-	elif ars.isinteger(bdis) and bdis < 0:
-		bdis = [list(range(1,int(np.ceil(-bdis/coarse_points))+1))]
 	elif ars.isinteger(bdis):
-		bdis = [[bdis]]
+		bdis = [list(range(1,int(np.ceil(bdis/coarse_points))+1))]
 	elif ars.isarray(bdis) and ars.isinteger(bdis[0]):
 		bdis = [bdis[::coarse_points]]
 	elif ars.isarray(bdis) and ars.isarray(bdis[0]) and ars.isinteger(bdis[0][0]):
@@ -259,38 +357,82 @@ def readAtomDump(datFile, nstep_skip=0, coarse_time=1, bdis='all', coarse_points
 	for i in range(len(bdis)):
 		nbd_use += len(bdis[i])
 
-	### extract the data
+	### initialize
 	points = np.zeros((nstep_use,nbd_use,3))
 	col2s = np.zeros(nbd_use, dtype=int)
-	groups = np.zeros(nbd_use, dtype=int)
 	dbox3s = np.zeros((nstep_use,3))
-	for i in range(nstep_use):
-		point_count = 0
-		for k in range(3):
-			line = content[(nbd_total+9)*(nstep_skip+i*coarse_time)+5+k].split()
-			dbox3s[i,k] = float(line[1]) - float(line[0])
-		for g in range(len(bdis)):
-			for j in range(len(bdis[g])):
-				bdi = bdis[g][j]
-				if bdi > nbd_total:
-					print(f"Error: Cannot read atom dump - requested bead index {bdi} exceeds the number of beads in the simulation ({nbd_total}).\n")
-					sys.exit()
-				line = content[(nbd_total+9)*(nstep_skip+i*coarse_time)+9+bdi-1].split()
-				if i == 0:
-					col2s[point_count] = int(line[1])
-					groups[point_count] = g + 1
-				points[i,point_count] = (np.array(line[2:5],dtype=float)-1/2)*dbox3s[i]
-				point_count += 1
-		if not ignorePBC:
-			points[i] = ars.applyPBC(points[i], dbox3s[i])
-		if (i+1)%report_every == 0:
-			print(f"processed {i+1} steps...")
+	groups = np.zeros(nbd_use, dtype=int)
+	quats = np.zeros((nstep_use,nbd_use,4))
+
+	### extract the data
+	ars.initStatusBar("Reading file")
+	with open(datFile, 'r') as f:
+
+		### loop over steps
+		si = 0
+		for i in range(nstep_recorded):
+
+			### read frame
+			content = [f.readline() for _ in range(nbd_total+9)]
+
+			### skip unused steps
+			if i < nstep_skip or (i-nstep_skip)%coarse_time != 0:
+				continue
+
+			for k in range(3):
+				line = content[5+k].split()
+				dbox3s[si,k] = float(line[1]) - float(line[0])
+
+			### loop over points
+			pi = 0
+			for g in range(len(bdis)):
+				for j in range(len(bdis[g])):
+					bdi = bdis[g][j]
+
+					### read line if valid
+					if bdi <= nbd_total:
+						line = content[9+bdi-1].split()
+					else:
+						print(f"Error: Cannot read atom dump - requested bead index {bdi} exceeds the number of beads in the simulation ({nbd_total}).\n")
+						sys.exit()
+
+					### read descriptors
+					if si == 0:
+						col2s[pi] = int(line[1])
+						groups[pi] = g + 1
+
+					### read positions
+					points[si,pi] = np.array(line[col_x:col_x+3],dtype=float)
+					if isScaled:
+						points[si,pi] = (points[si,pi]-1/2)*dbox3s[si]
+
+					### read orientations
+					if getQuats:
+						quats[si,pi] = np.array(line[col_quat:col_quat+4],dtype=float)
+
+					### increment
+					pi += 1
+
+			### periodic boundary
+			if not ignorePBC:
+				points[si] = ars.applyPBC(points[si], dbox3s[si])
+
+			### progress updates
+			ars.updateStatusBar(si,nstep_use)
+
+			### finish or increment
+			if si+1 == nstep_use:
+				break
+			else:
+				si += 1
 
 	### results
-	output = [ points, col2s ]
+	output = [ points ]
+	if getCol2s: output.append(col2s)
 	output.append(dbox3s[0,0])
 	if getDbox3s: output[-1] = dbox3s
 	if len(bdis) > 1: output.append(groups)
+	if getQuats: output.append(quats)
 	if getStepsPerFrame: output.append(steps_per_frame*coarse_time)
 	return output
 
@@ -304,29 +446,27 @@ def getNstep(datFile, nstep_skip=0, coarse_time=1):
 				nbd_total = int(line.split()[0])
 				break
 		nlines = i + 1 + sum(1 for _ in f)
-	nstep_recorded = int(nlines / (nbd_total + 9))
-	nstep_trimmed = int((nstep_recorded - nstep_skip - 1) / coarse_time) + 1
+	nstep_recorded = nlines // (nbd_total + 9)
+	nstep_trimmed = (nstep_recorded-nstep_skip-1) // coarse_time + 1
+	if nstep_trimmed <= 0:
+		print("Error: Cannot get number of steps in atom dump - too much initial time cut off.\n")
+		sys.exit()
 	return nstep_trimmed
 
 
 ### extract effective steps per frame from lammps-style trajectory
 def getStepsPerFrame(datFile, coarse_time=1):
 	ars.checkFileExist(datFile, "trajectory")
+	steps_per_frame = 0
 	with open(datFile, 'r') as f:
-		target_lines = {1, 3}
-		values = {}
 		for i, line in enumerate(f):
-			if i in target_lines:
-				values[i] = int(line.split()[0])
+			if i == 1:
+				step_init = int(line.split()[0])
 			if i == 3:
-				nbd_total = values[3]
-				target_lines.add(nbd_total + 10)
-			if i == nbd_total + 10:
+				nbd_total = int(line.split()[0])
+			if i > 3 and i == nbd_total + 10:
+				steps_per_frame = int(line.split()[0]) - step_init
 				break
-	if nbd_total + 10 in values:
-		steps_per_frame = values[nbd_total + 10] - values[1]
-	else:
-		steps_per_frame = 0
 	return steps_per_frame * coarse_time
 
 
@@ -465,6 +605,7 @@ def plotThermo(reportFile="report.out", cols=["E_mol","TotEng"]):
 def readGeo(geoFile, **kwargs):
 
 	### keyword arguments
+	style		= 'mol'	if 'style' not in kwargs else kwargs['style']
 	extraLabel	= None	if 'extraLabel' not in kwargs else kwargs['extraLabel']
 	getDbox		= None	if 'getDbox' not in kwargs else kwargs['getDbox']
 	getDbox3	= None	if 'getDbox3' not in kwargs else kwargs['getDbox3']
@@ -521,35 +662,49 @@ def readGeo(geoFile, **kwargs):
 	molecules = np.zeros(natom, dtype=int)
 	types = np.zeros(natom, dtype=int)
 	charges = np.zeros(natom)
-	readCharge = False
 	if natom:
 		for i in range(len(content)):
 			if len(content[i].split()) > 0 and content[i].split()[0] == 'Atoms':
-				line_index = i+2
+				line_idx = i+2
 				break	
 		for i in range(natom):
-			line = content[line_index].split()
-			line_index += 1
+			line = content[line_idx].split()
+			line_idx += 1
 
 			### identification
 			ai = int(line[0])-1
-			molecules[ai] = line[1]
-			types[ai] = line[2]
 
-			### assume molecular atom style
-			if len(line) == 6 or len(line) == 9:
+			### gather data for molecular atom style
+			if style == 'mol':
+				if len(line) != 6 and len(line) != 9:
+					print("Error: Incorrect number of columns for atom style molecular.")
+					sys.exit()
+				molecules[ai] = line[1]
+				types[ai] = line[2]
 				r[ai] = line[3:6]
 
-			### assume full atom style
-			elif len(line) == 7 or len(line) == 10:
-				if i == 0:
-					readCharge = True
+			### gather data for full atom style
+			elif style == 'full':
+				if len(line) != 7 and len(line) != 10:
+					print("Error: Incorrect number of columns of atom style full.")
+					sys.exit()
+				molecules[ai] = line[1]
+				types[ai] = line[2]
 				charges[ai] = line[3]
 				r[ai] = line[4:7]
 
+			### gather data for ox atom style
+			elif style == 'ox':
+				if len(line) != 8 and len(line) != 11:
+					print("Error: Incorrect number of columns of atom style oxDNA.")
+					sys.exit()
+				types[ai] = line[1]
+				r[ai] = line[2:5]
+				molecules[ai] = line[6]
+
 			### throw error
 			else:
-				print("Error: Cannot read geometry - unable to surmise atom style.\n")
+				print("Error: Cannot read geometry - unrecognized atom style.\n")
 				sys.exit()
 
 	### get bond information
@@ -557,55 +712,77 @@ def readGeo(geoFile, **kwargs):
 	if nbond:
 		for i in range(len(content)):
 			if len(content[i].split()) > 0 and content[i].split()[0] == 'Bonds':
-				line_index = i+2
+				line_idx = i+2
 				break
 		for i in range(nbond):
-			bonds[i,0] = content[line_index].split()[1]
-			bonds[i,1] = content[line_index].split()[2]
-			bonds[i,2] = content[line_index].split()[3]
-			line_index += 1
+			line = content[line_idx].split()
+			bonds[i,0] = line[1]
+			bonds[i,1] = line[2]
+			bonds[i,2] = line[3]
+			line_idx += 1
 
 	### get angle information
 	angles = np.zeros((nangle,4), dtype=int)
 	if nangle:
 		for i in range(len(content)):
 			if len(content[i].split()) > 0 and content[i].split()[0] == 'Angles':
-				line_index = i+2
+				line_idx = i+2
 				break
 		for i in range(nangle):
-			angles[i,0] = content[line_index].split()[1]
-			angles[i,1] = content[line_index].split()[2]
-			angles[i,2] = content[line_index].split()[3]
-			angles[i,3] = content[line_index].split()[4]
-			line_index += 1
-
+			line = content[line_idx].split()
+			angles[i,0] = line[1]
+			angles[i,1] = line[2]
+			angles[i,2] = line[3]
+			angles[i,3] = line[4]
+			line_idx += 1
 
 	### get bond information
 	if extraLabel is not None:
-		line_index = -1
+		line_idx = -1
 		for i in range(len(content)):
 			if len(content[i].split()) > 0 and content[i].split()[0] == extraLabel:
-				line_index = i+2
+				line_idx = i+2
 				break
 
 		### check if extras were found
-		if line_index == -1:
+		if line_idx == -1:
 			print("Error: extra label not found.\n")
 			sys.exit()
 
-		nextra = len(content[line_index].split())-1
+		nextra = len(content[line_idx].split())-1
 		extras = np.zeros((natom,nextra))
 		for i in range(natom):
-			line = content[line_index].split()
-			line_index += 1
+			line = content[line_idx].split()
+			line_idx += 1
 
 			ai = int(line[0])-1
 			for j in range(nextra):
 				extras[ai,j] = line[j+1]
 
+	### get ellipsoid information
+	if style == 'ox':
+		radii = np.zeros((natom,3))
+		quats = np.zeros((natom,4))
+		for i in range(len(content)):
+			if len(content[i].split()) > 0 and content[i].split()[0] == 'Ellipsoids':
+				line_idx = i+2
+				break
+		for i in range(natom):
+			line = content[line_idx].split()
+			radii[i,0] = line[1]
+			radii[i,1] = line[2]
+			radii[i,2] = line[3]
+			quats[i,0] = line[4]
+			quats[i,1] = line[5]
+			quats[i,2] = line[6]
+			quats[i,3] = line[7]
+			line_idx += 1
+
 	### results
 	output = [ r, molecules, types ]
-	if readCharge: output.append(charges)
+	if style == 'full': output.append(charges)
+	if style == 'ox': output.append(radii)
+	if style == 'ox': output.append(quats)
 	output.append(bonds)
 	output.append(angles)
 	if extraLabel is not None: output.append(extras)
@@ -724,8 +901,8 @@ def findArsReferences(searchFile=sys.argv[0], hush=False):
 ################################################################################
 ### File Writers
 
-### write lammps-style atom dump
-def writeAtomDump(outDatFile, dbox3s, points, col2s='auto', steps_per_frame=1, setColor=True):
+### write lammps-style trajectory
+def writeAtomDump(outDatFile, dbox3s, points, col2s='auto', steps_per_frame=1, setColor=True, quats=None):
 	nstep = points.shape[0]
 	npoint = points.shape[1]
 
@@ -735,7 +912,7 @@ def writeAtomDump(outDatFile, dbox3s, points, col2s='auto', steps_per_frame=1, s
 	elif ars.isarray(dbox3s) and ars.isnumber(dbox3s[0]) and len(dbox3s) == 3:
 		dbox3s = np.ones((nstep,3))*dbox3s
 	elif not ars.isarray(dbox3s) or len(dbox3s) != nstep or not ars.isarray(dbox3s[0]) or len(dbox3s[0]) != 3:
-		print("Error: Cannot center points - dbox3s must be number, nstep-element array, or nstep x 3 array.\n")
+		print("Error: Cannot write atom dump - dbox3s must be number, nstep-element array, or nstep x 3 array.\n")
 		sys.exit()
 	if isinstance(col2s, str) and col2s == 'auto':
 		col2s = np.ones(npoint, dtype=int)
@@ -745,6 +922,7 @@ def writeAtomDump(outDatFile, dbox3s, points, col2s='auto', steps_per_frame=1, s
 	len_ncol2 = len(str(max(col2s)))
 
 	### write file
+	ars.initStatusBar("Writing file")
 	with open(outDatFile,'w') as f:
 		for i in range(nstep):
 			len_dbox = len(str(int(max(dbox3s[i])/2)))
@@ -755,15 +933,25 @@ def writeAtomDump(outDatFile, dbox3s, points, col2s='auto', steps_per_frame=1, s
 			f.write(f"-{dbox3s[i,1]/2:<{len_dbox+3}.2f} {dbox3s[i,1]/2:<{len_dbox+3}.2f} ylo yhi\n")
 			f.write(f"-{dbox3s[i,2]/2:<{len_dbox+3}.2f} {dbox3s[i,2]/2:<{len_dbox+3}.2f} zlo zhi\n")
 			if setColor:
-				f.write("ITEM: ATOMS id type xs ys zs\n")
+				f.write("ITEM: ATOMS id type xs ys zs")
 			else:
-				f.write("ITEM: ATOMS id mol xs ys zs\n")
+				f.write("ITEM: ATOMS id mol xs ys zs")
+			if quats is not None:
+				f.write(" orientation.w orientation.x orientation.y orientation.z")
+			f.write("\n")
 			for j in range(npoint):
 				f.write(f"{j+1:<{len_npoint}} " + \
 						f"{col2s[j]:<{len_ncol2}} " + \
 						f"{points[i,j,0]/dbox3s[i,0]+1/2:10.8f} " + \
 						f"{points[i,j,1]/dbox3s[i,1]+1/2:10.8f} " + \
-						f"{points[i,j,2]/dbox3s[i,2]+1/2:10.8f}\n")
+						f"{points[i,j,2]/dbox3s[i,2]+1/2:10.8f}")
+				if quats is not None:
+					f.write(f" {quats[i,j,0]:11.8f}" + \
+							f" {quats[i,j,1]:11.8f}" + \
+							f" {quats[i,j,2]:11.8f}" + \
+							f" {quats[i,j,3]:11.8f}")
+				f.write("\n")
+			ars.updateStatusBar(i,nstep)
 
 
 ### write lammps-style geometry
@@ -776,6 +964,8 @@ def writeGeo(geoFile, dbox3, r, molecules='auto', types='auto', bonds=None, angl
 	masses		= 'auto'	if 'masses' not in kwargs else kwargs['masses']
 	charges		= None		if 'charges' not in kwargs else kwargs['charges']
 	extras		= None		if 'extras' not in kwargs else kwargs['extras']
+	radii		= None		if 'radii' not in kwargs else kwargs['radii']
+	quats		= None		if 'quats' not in kwargs else kwargs['quats']
 	x_precision	= 2			if 'x_precision' not in kwargs else kwargs['x_precision']
 	q_precision	= 4			if 'q_precision' not in kwargs else kwargs['q_precision']
 	e_precision	= 4			if 'e_precision' not in kwargs else kwargs['e_precision']
@@ -824,6 +1014,14 @@ def writeGeo(geoFile, dbox3, r, molecules='auto', types='auto', bonds=None, angl
 		print("Flag: Not writing geometry file - extras must be array with natom elements in the first dimension.")
 		return
 
+	### check ellipsoid data
+	if radii is not None and quats is None:
+		print("Error: Ellipsoid radii provided without quaternions.")
+		sys.exit()
+	if radii is None and quats is not None:
+		print("Error: Ellipsoid quaternions provided without radii.")
+		sys.exit()
+
 	### numpify data
 	r = np.asarray(r)
 	molecules = np.asarray(molecules)
@@ -839,7 +1037,7 @@ def writeGeo(geoFile, dbox3, r, molecules='auto', types='auto', bonds=None, angl
 	elif not ars.isinteger(natomType):
 		print("Flag: Not writing geometry file - natomType must be 'auto' or integer.")
 		return
-	if isinstance(nbondType, str) and nbondType == 'auto':\
+	if isinstance(nbondType, str) and nbondType == 'auto':
 		nbondType = int(max(bonds[:,0])) if nbond else 0
 	elif not ars.isinteger(nbondType):
 		print("Flag: Not writing geometry file - nbondType must be 'auto' or integer.")
@@ -885,6 +1083,14 @@ def writeGeo(geoFile, dbox3, r, molecules='auto', types='auto', bonds=None, angl
 	if x_precision > 0:
 		len_x += 1+x_precision
 
+	### determine space for ellipsoid radii
+	if radii is not None:
+		len_r = [None]*3
+		for i in range(3):
+			len_r[i] = len(str(int(max(radii[:,i]))))
+			if x_precision > 0:
+				len_r[i] += 1+x_precision
+
 	### determine space for charge data
 	if includeCharge:
 		len_q = len(str(int(max(abs(charges)))))
@@ -908,6 +1114,8 @@ def writeGeo(geoFile, dbox3, r, molecules='auto', types='auto', bonds=None, angl
 
 		f.write("## Number of Objects\n")
 		f.write(f"\t{natom:<{len_nobject}} atoms\n")
+		if radii is not None:
+			f.write(f"\t{natom:<{len_nobject}} ellipsoids\n")
 		if nbond:
 			f.write(f"\t{nbond:<{len_nobject}} bonds\n")
 		if nangle:
@@ -931,14 +1139,34 @@ def writeGeo(geoFile, dbox3, r, molecules='auto', types='auto', bonds=None, angl
 
 		f.write("\nAtoms\n\n")
 		for i in range(natom):
-			f.write(f"\t{i+1:<{len_natom}}" + \
-					f" {int(molecules[i]):<{len_nmolecule}}" + \
-					f" {int(types[i]):<{len_natomType}} ")
-			if includeCharge:
-				f.write(f"{charges[i]:>{len_q}.{q_precision}f}") 
+			f.write(f"\t{i+1:<{len_natom}} ")
+			if radii is None:
+				f.write(f"{int(molecules[i]):<{len_nmolecule}} ")
+			f.write(f"{int(types[i]):<{len_natomType}} ")
+			if radii is None and includeCharge:
+				f.write(f"{charges[i]:>{len_q}.{q_precision}f} ")
 			f.write(f"{r[i,0]:>{len_x}.{x_precision}f} " + \
 					f"{r[i,1]:>{len_x}.{x_precision}f} " + \
-					f"{r[i,2]:>{len_x}.{x_precision}f}\n")
+					f"{r[i,2]:>{len_x}.{x_precision}f}")
+			if radii is None:
+				f.write("\n")
+			else:
+				f.write(f" {int(molecules[i]):<{len_nmolecule}} ")
+				if includeCharge:
+					f.write(f"{charges[i]:>{len_q}.{q_precision}f} ")
+				f.write("1 1\n")
+
+		if radii is not None:
+			f.write("\nEllipsoids\n\n")
+			for i in range(natom):
+				f.write(f"\t{i+1:<{len_natom}} " + \
+						f"{radii[i,0]:>{len_r[0]}.{x_precision}f} " + \
+						f"{radii[i,1]:>{len_r[1]}.{x_precision}f} " + \
+						f"{radii[i,2]:>{len_r[2]}.{x_precision}f} " + \
+						f"{quats[i,0]:>11.8f} " + \
+						f"{quats[i,1]:>11.8f} " + \
+						f"{quats[i,2]:>11.8f} " + \
+						f"{quats[i,3]:>11.8f}\n")
 
 		if nbond:
 			f.write("\nBonds\n\n")
@@ -1132,11 +1360,10 @@ def deployArsenal(srcFold=os.getcwd()+"/"):
 def magicPlot(pubReady=False, useTex=False, **kwargs):
 
 	### additional keyword args
-	font		= None	if 'font' not in kwargs else kwargs['font']
-	size		= (8,6)	if 'size' not in kwargs else kwargs['size']
-	autoBox		= False	if 'autoBox' not in kwargs else kwargs['autoBox']
-	shift_x		= 0		if 'shift_x' not in kwargs else kwargs['shift_x']
-	shift_y		= 0		if 'shift_y' not in kwargs else kwargs['shift_y']
+	font		= None		if 'font' not in kwargs else kwargs['font']
+	size		= (8,6)		if 'size' not in kwargs else kwargs['size']
+	shift_x		= 0			if 'shift_x' not in kwargs else kwargs['shift_x']
+	shift_y		= 0			if 'shift_y' not in kwargs else kwargs['shift_y']
 	
 	### determine font size
 	if not pubReady:
@@ -1150,6 +1377,11 @@ def magicPlot(pubReady=False, useTex=False, **kwargs):
 			font = 'Helvetica'
 		else:
 			font = 'Times'
+
+	### determine whether to set box
+	setBox = False
+	if size == (8,6):
+		setBox = True
 
 	### set default magic settings
 	params = {
@@ -1170,12 +1402,12 @@ def magicPlot(pubReady=False, useTex=False, **kwargs):
 	}
 	plt.rcParams.update(params)
 
-	if not autoBox:
+	if setBox:
 		params = {
-			'figure.subplot.left'		: (0.125*8+shift_x)/size[0],
-			'figure.subplot.right'		: (0.9*8+shift_x)/size[0],
-			'figure.subplot.bottom'		: (0.1*6+shift_y)/size[1],
-			'figure.subplot.top'		: (0.9*6+shift_y)/size[1]
+			'figure.subplot.left'	: (0.125*8+shift_x)/size[0],
+			'figure.subplot.right'	: (0.9*8+shift_x)/size[0],
+			'figure.subplot.bottom'	: (0.1*6+shift_y)/size[1],
+			'figure.subplot.top'	: (0.9*6+shift_y)/size[1]
 		}
 		plt.rcParams.update(params)
 
@@ -1187,7 +1419,7 @@ def initFig(figLabel='auto', Xlabel=None, Ylabel=None, Xlim=None, Ylim=None, tit
 	if ax is not None:
 		plt.sca(ax)
 		if figLabel != 'auto' and figLabel != figLabelAuto:
-			print("Warining: Unused figure label input.")
+			print("Warning: Unused figure label input.")
 	else:
 		if figLabel == 'auto':
 			plt.figure(figLabelAuto)
@@ -1334,13 +1566,13 @@ def plotLine(X, Y, figLabel='auto', Xlabel=None, Ylabel=None, Xlim=None, Ylim=No
 	errcapsize		= None		if 'errcapsize' not in kwargs else kwargs['errcapsize']
 	errlinewidth	= None		if 'errlinewidth' not in kwargs else kwargs['errlinewidth']
 	shadeE			= False		if 'shadeE' not in kwargs else kwargs['shadeE']
-	label			= None		if 'label' not in kwargs else kwargs['label']
 	ax				= None		if 'ax' not in kwargs else kwargs['ax']
 
 	### numpify data
-	A = np.asarray(X, dtype=float)
+	X = np.asarray(X, dtype=float)
 	Y = np.asarray(Y, dtype=float)
-	E = np.asarray(E, dtype=float)
+	if E is not None:
+		E = np.asarray(E, dtype=float)
 
 	### process marker
 	if isinstance(markeredgewidth, str) and markeredgewidth == 'auto':
@@ -1359,7 +1591,7 @@ def plotLine(X, Y, figLabel='auto', Xlabel=None, Ylabel=None, Xlim=None, Ylim=No
 
 	### plot line
 	line = plt.plot(X, Y, color=color, linestyle=linestyle, linewidth=linewidth, marker=marker, markersize=markersize, mew=markeredgewidth, mec=markeredgecolor, mfc=markerfacecolor, alpha=alpha, zorder=zorder,label=label)[0]
-	color = to_rgb(line.get_color())
+	color = mcolors.to_rgb(line.get_color())
 
 	### set auto errorbar color
 	if isinstance(errcolor, str) and errcolor == 'auto':
@@ -1368,7 +1600,7 @@ def plotLine(X, Y, figLabel='auto', Xlabel=None, Ylabel=None, Xlim=None, Ylim=No
 	### plot errorbars
 	if E is not None:
 		if not shadeE:
-			plt.errorbar(X, Y, E, fmt='none', ecolor=errcolor, capsize=errcapsize, linewidth=errlinewidth, capthick=errlinewidth)
+			plt.errorbar(X, Y, E, fmt='none', ecolor=errcolor, capsize=errcapsize, elinewidth=errlinewidth, capthick=errlinewidth)
 		else:
 			plt.fill_between(X, Y-E, Y+E, color=errcolor, alpha=0.2, linewidth=0)
 
@@ -1475,7 +1707,7 @@ def plotDists(As, figLabel='auto', Alabel=None, Alim=None, title=None, **kwargs)
 def plotHist(A, figLabel='auto', Alabel=None, nbin='auto', Alim_bin='auto', Alim_plot='auto', title=None, **kwargs):
 
 	### additional keyword args
-	useDensity		= False		if 'useDensity' not in kwargs else kwargs['useDenstiy']
+	useDensity		= False		if 'useDensity' not in kwargs else kwargs['useDensity']
 	Ylabel			= 'auto'	if 'Ylabel' not in kwargs else kwargs['Ylabel']
 	Ylim			= 'auto'	if 'Ylim' not in kwargs else kwargs['Ylim']
 	weights			= None		if 'weights' not in kwargs else kwargs['weights']
@@ -1509,11 +1741,16 @@ def plotHist(A, figLabel='auto', Alabel=None, nbin='auto', Alim_bin='auto', Alim
 	plotMed			= False		if 'plotMed' not in kwargs else kwargs['plotMed']
 	plotStd			= False		if 'plotStd' not in kwargs else kwargs['plotStd']
 	avg_label		= 'auto'	if 'avg_label' not in kwargs else kwargs['avg_label']
-	avg_color		= 'red'		if 'avg_color' not in kwargs else kwargs['avg_color']
 	med_label		= 'auto'	if 'med_label' not in kwargs else kwargs['med_label']
-	med_color		= 'red'		if 'med_color' not in kwargs else kwargs['med_color']
 	std_label		= 'auto'	if 'std_label' not in kwargs else kwargs['std_label']
+	avg_color		= 'red'		if 'avg_color' not in kwargs else kwargs['avg_color']
+	med_color		= 'red'		if 'med_color' not in kwargs else kwargs['med_color']
 	std_color		= 'red'		if 'std_color' not in kwargs else kwargs['std_color']
+	avg_precision	= 2			if 'avg_precision' not in kwargs else kwargs['avg_precision']
+	med_precision	= 2			if 'med_precision' not in kwargs else kwargs['med_precision']
+	std_precision	= 2			if 'std_precision' not in kwargs else kwargs['std_precision']
+	xtick_spacing	= None		if 'xtick_spacing' not in kwargs else kwargs['xtick_spacing']
+	ytick_spacing	= None		if 'ytick_spacing' not in kwargs else kwargs['ytick_spacing']
 	ax				= None		if 'ax' not in kwargs else kwargs['ax']
 	hush			= True		if 'hush' not in kwargs else kwargs['hush']
 
@@ -1563,14 +1800,17 @@ def plotHist(A, figLabel='auto', Alabel=None, nbin='auto', Alim_bin='auto', Alim
 	if isinstance(Alim_bin, str) and Alim_bin == 'auto':
 		Alim_bin = [ min(A), max(A) ]
 		if Alim_bin[0] == Alim_bin[1]:
-			print("Flag: Skipping hitogram plot - all values are the same.")
+			print("Flag: Skipping histogram plot - all values are the same.")
 			return
 	elif not ars.isarray(Alim_bin) or len(Alim_bin) != 2:
 		print("Flag: Skipping histogram plot - variable limits must be either 'auto' or 2-element array.")
 		return
 	if isinstance(Alim_plot, str) and Alim_plot == 'auto':
-		dAbin = (Alim_bin[1]-Alim_bin[0])/nbin
-		Alim_plot = [ Alim_bin[0]-dAbin/2, Alim_bin[1]+dAbin/2 ]
+		if plotBins:
+			dAbin = (Alim_bin[1]-Alim_bin[0])/nbin
+			Alim_plot = [ Alim_bin[0]-dAbin/2, Alim_bin[1]+dAbin/2 ]
+		else:
+			Alim_plot = Alim_bin
 	elif not ars.isarray(Alim_plot) or len(Alim_plot) != 2:
 		if Alim_plot is not None:
 			print("Flag: Skipping histogram plot - variable limits must be None, 'auto', or 2-element array.")
@@ -1689,7 +1929,7 @@ def plotHist(A, figLabel='auto', Alabel=None, nbin='auto', Alim_bin='auto', Alim
 		if assumeIID:
 			tau_int = 1
 		else:
-			tau_int = 1 + 2*ars.calcCorrTime(A)
+			tau_int = 1 + 2*ars.calcCorrTime(A, hush)
 			if not hush and tau_int > 1:
 				print(f"Using integrated correlation time estimate {tau_int:0.2f} for error bars.")
 
@@ -1705,17 +1945,11 @@ def plotHist(A, figLabel='auto', Alabel=None, nbin='auto', Alim_bin='auto', Alim
 	### initialize figure
 	ars.initFig(figLabel, Alabel, Ylabel, Alim_plot, None, title, ax, "Hist")
 
-	### set y-axis limits
-	if ylim is not None:
-		plt.ylim(bottom=Ylim[0])
-		if Ylim[1] != 0:
-			plt.ylim(top=Ylim[1])
-
 	### plot data as bins
 	if plotBins:
 		bars = plt.bar(centers, heights/scale, width_bin, color=color, alpha=alpha)
 		plt.bar(centers, heights/scale, width_bin, facecolor='none', edgecolor=edgecolor, alpha=edgealpha)
-		color = to_rgb(bars[0].get_facecolor())
+		color = mcolors.to_rgb(bars[0].get_facecolor())
 		if not isDataLabeled:
 			bars[0].set_label(label)
 			isDataLabeled = True
@@ -1723,7 +1957,7 @@ def plotHist(A, figLabel='auto', Alabel=None, nbin='auto', Alim_bin='auto', Alim
 	### plot data as steps
 	if plotSteps:
 		bars = plt.hist(A, nbin, weights=weights, range=Alim_bin, density=useDensity, color=color, linewidth=2, histtype='step')[2]
-		color = to_rgb(bars[0].get_edgecolor())
+		color = mcolors.to_rgb(bars[0].get_edgecolor())
 		if not isDataLabeled:
 			bars[0].set_label(label)
 			isDataLabeled = True
@@ -1731,7 +1965,7 @@ def plotHist(A, figLabel='auto', Alabel=None, nbin='auto', Alim_bin='auto', Alim
 	### plot data as line
 	if plotLine:
 		line = plt.plot(centers, heights/scale, color=color, linewidth=2)[0]
-		color = to_rgb(line.get_color())
+		color = mcolors.to_rgb(line.get_color())
 		if not isDataLabeled:
 			line.set_label(label)
 			isDataLabeled = True
@@ -1759,7 +1993,7 @@ def plotHist(A, figLabel='auto', Alabel=None, nbin='auto', Alim_bin='auto', Alim
 		X = np.linspace(Alim_bin[0], Alim_bin[1], npoint_fit)
 		Y = gaussian_kde(A, weights=weights)(X)*area_full
 		curve = plt.plot(X, Y/scale, color=color, linewidth=2)[0]
-		color = to_rgb(curve.get_color())
+		color = mcolors.to_rgb(curve.get_color())
 		if gauss_color != 'match':
 			curve.set_color(gauss_color)
 		if gauss_label == 'match':
@@ -1790,7 +2024,7 @@ def plotHist(A, figLabel='auto', Alabel=None, nbin='auto', Alim_bin='auto', Alim
 		X = np.linspace(Alim_bin[0], Alim_bin[1], npoint_fit)
 		Y = norm.pdf(X, loc=mu, scale=sigma)*area_full
 		curve = plt.plot(X, Y/scale, color=color, linewidth=2)[0]
-		color = to_rgb(curve.get_color())
+		color = mcolors.to_rgb(curve.get_color())
 		if norm_color != 'match':
 			curve.set_color(norm_color)
 		if norm_label == 'match':
@@ -1823,7 +2057,7 @@ def plotHist(A, figLabel='auto', Alabel=None, nbin='auto', Alim_bin='auto', Alim
 		X = np.linspace(Alim_bin[0], Alim_bin[1], npoint_fit)
 		Y = lognorm.pdf(X, s=sigma, scale=np.exp(mu))*area_full
 		curve = plt.plot(X, Y/scale, color=color, linewidth=2)[0]
-		color = to_rgb(curve.get_color())
+		color = mcolors.to_rgb(curve.get_color())
 		if logNorm_color != 'match':
 			curve.set_color(logNorm_color)
 		if logNorm_label == 'match':
@@ -1857,7 +2091,7 @@ def plotHist(A, figLabel='auto', Alabel=None, nbin='auto', Alim_bin='auto', Alim
 		else:
 			line.set_color(avg_color)
 		if avg_label is not None:
-			line.set_label(f"{avg_label} = {avg:0.2f}")
+			line.set_label(f"{avg_label} = {avg:0.{avg_precision}f}")
 
 	### median line
 	if plotMed:
@@ -1867,7 +2101,7 @@ def plotHist(A, figLabel='auto', Alabel=None, nbin='auto', Alim_bin='auto', Alim
 		else:
 			line.set_color(med_color)
 		if med_label is not None:
-			line.set_label(f"{med_label} = {med:0.2f}")
+			line.set_label(f"{med_label} = {med:0.{med_precision}f}")
 
 	### standard deviation lines
 	if plotStd:
@@ -1882,7 +2116,19 @@ def plotHist(A, figLabel='auto', Alabel=None, nbin='auto', Alim_bin='auto', Alim
 		else:
 			line.set_color(std_color)
 		if std_label is not None:
-			line.set_label(f"{std_label} = {std:0.2f}")
+			line.set_label(f"{std_label} = {std:0.{std_precision}f}")
+
+	### set y-axis limits
+	if Ylim is not None:
+		plt.ylim(bottom=Ylim[0], auto=True)
+		if Ylim[1] != 0:
+			plt.ylim(top=Ylim[1])
+
+	### set tick spacing
+	if xtick_spacing is not None:
+		plt.gca().xaxis.set_major_locator(plt.MultipleLocator(xtick_spacing))
+	if ytick_spacing is not None:
+		plt.gca().yaxis.set_major_locator(plt.MultipleLocator(ytick_spacing))
 
 	### create legend
 	if legend:
@@ -1899,6 +2145,8 @@ def plotHist2D(A, B, figLabel='auto', Alabel=None, Blabel=None, nbin='auto', Ali
 	### clean data
 	A = np.asarray(A, dtype=float)
 	A = A[~np.isnan(A)]
+	B = np.asarray(B, dtype=float)
+	B = B[~np.isnan(B)]
 
 	### interpret input
 	if isinstance(nbin, str) and nbin == 'auto':
@@ -1987,7 +2235,7 @@ def plotPMF(A, figLabel='auto', Alabel=None, nbin='auto', Alim_bin='auto', Alim_
 	### plot PMF
 	plt.plot(bins, PMF, '-o', color=color)
 
-	### result
+	### results
 	return bins, PMF
 
 
@@ -2024,7 +2272,7 @@ def plotUS(OPs_eq, weights, OPs_ts, OPs_wham, PMF, PMF_err, nbin='auto', OPlabel
 		titlePMF = titlePrefix + " " + titlePMF
 	figLabelHist = "US Hist"
 	figLabelPMF = "PMF"
-	if titlePrefix is not None:
+	if figLabelPrefix is not None:
 		figLabelHist = f"{figLabelPrefix} {figLabelHist}"
 		figLabelPMF = f"{figLabelPrefix} {figLabelPMF}"
 
@@ -2036,7 +2284,6 @@ def plotUS(OPs_eq, weights, OPs_ts, OPs_wham, PMF, PMF_err, nbin='auto', OPlabel
 		label = f"$OP={OPs_eq[i]:0.{OP_precision}f}$, $w={weights[i]:0.{weight_precision}f}$"
 		ars.plotHist(OPs_ts[i], figLabel=figLabelHist, nbin=nbin, Alim_plot=None, alpha=0.4, useDensity=True, plotGauss=True, label=label)
 	plt.xlabel(OPlabel)
-	plt.ylabel("Density")
 	if insideLegend:
 		plt.legend(loc='best')
 	else:
@@ -2061,7 +2308,7 @@ def plotMSD(points, dbox3, dt_per_frame, nbin=10, figLabel="MSD", Xlabel=None, Y
 			return point
 	elif len(points.shape) == 3:
 		def getCOM(points):
-			return np.mean(points, axis=0)
+			return ars.calcCOM(points,dbox3)
 
 	### calculate MSD
 	nstep = int(points.shape[0])
@@ -2142,7 +2389,7 @@ def plotBondWrite(bondWriteFile):
 ### Calculations
 
 ### use wham to calculate PMF
-def calcPMF(OPs_eq, weights, OPs_ts, tsFold, nbin, bin_padding, whamMetaFile, whamOutFile):
+def calcPMF(OPs_eq, weights, OPs_ts, tsFold, nbin, bin_padding, whamMetaFile, whamOutFile, assumeIID=False):
 
 	### notes
 	# the weights need to be in kcal/mol*{op unit}^2.
@@ -2170,7 +2417,9 @@ def calcPMF(OPs_eq, weights, OPs_ts, tsFold, nbin, bin_padding, whamMetaFile, wh
 	with open(whamMetaFile, 'w') as f:
 		for i in range(nsim):
 			tsFile = tsFold + f"ts_sim{i:02}.txt"
-			tau_int = 1 + 2*ars.calcCorrTime(OPs_ts[i])
+			tau_int = 1
+			if not assumeIID:
+				tau_int += 2*ars.calcCorrTime(OPs_ts[i])
 			f.write(f"{tsFile} {OPs_eq[i]} {weights[i]} {tau_int:.2f}\n")
 
 	### wham parameters (not expected to change)
@@ -2184,8 +2433,7 @@ def calcPMF(OPs_eq, weights, OPs_ts, tsFold, nbin, bin_padding, whamMetaFile, wh
 
 	### run wham (from Grossfield)
 	print("Running wham...\n")
-	subprocess.call(["wham", str(bin_min), str(bin_max), str(nbin), str(tol_wham), str(T_wham), "0", whamMetaFile, whamOutFile, str(ntrial_MC_wham), "37"])
-	print("")
+	subprocess.call(["/Users/dduke/.local/bin/wham", str(bin_min), str(bin_max), str(nbin), str(tol_wham), str(T_wham), "0", whamMetaFile, whamOutFile, str(ntrial_MC_wham), "37"]); print()
 
 	### read wham output, return
 	OPs_wham, PMF, PMF_err = ars.readWham(whamOutFile, nbin)
@@ -2193,12 +2441,15 @@ def calcPMF(OPs_eq, weights, OPs_ts, tsFold, nbin, bin_padding, whamMetaFile, wh
 
 
 ### shift trajectory, placing the given point at the center, optionally unwrapping molecules at boundary
-def centerPointsMolecule(points, molecules, dbox3s, center=1, unwrap=True, report_every=1000):
+def centerPointsMolecule(points, molecules, dbox3s, center=1, unwrap=True, report=True, excludeDummy=False):
 
 	### notes
 	# as the notation suggests, the indices contained in molecules must start at 1.
 	# particles located perfectly at the origin are assumed to be dummy, and are thus
 	  # not included in the center of mass calculation.
+
+	### add time dimension to single frames
+	points, ndim_add = ars.padDims(points)
 
 	### get counts
 	nstep = points.shape[0]
@@ -2228,25 +2479,26 @@ def centerPointsMolecule(points, molecules, dbox3s, center=1, unwrap=True, repor
 	points_centered = np.zeros((nstep,npoint,3))
 
 	### loop over steps
-	print("Centering trajectory...")
+	if report: ars.initStatusBar("Centering")
 	for i in range(nstep):
 
 		### calculate molecule coms
 		for j in range(nmolecule):
-			if ars.checkAllDummy(points_moleculed[j][i]):
-				molecule_coms[j] = np.zeros(3)
-			elif ars.checkAnyDummy(points_moleculed[j][i]):
-				print("Error: Molecule contains mixed dummy and activated beads.\n")
-				sys.exit()
-			molecule_coms[j] = ars.calcCOM(points_moleculed[j][i], dbox3s[i])
+			if checkAnyDummy(points_moleculed[j][i]):
+				if not excludeDummy:
+					print("Warning: Potential dummy beads detected.")
+				elif not checkAllDummy(points_moleculed[j][i]):
+					print("Error: Molecule contains mixed dummy and activated beads.\n")
+					sys.exit()
+			molecule_coms[j] = ars.calcCOM(points_moleculed[j][i], dbox3s[i], excludeDummy)
 
 		### set centering point
 		if center == 'none':
 			com = np.zeros(3)
 		elif center == 'com' or center == 'com_points' or center == 'com_beads' or center == 'com_bases':
-			com = ars.calcCOMnoDummy(points[i], dbox3s[i])
+			com = ars.calcCOM(points[i], dbox3s[i], excludeDummy)
 		elif center == 'com_molecules' or center == 'com_clusters':
-			com = ars.calcCOMnoDummy(molecule_coms, dbox3s[i])
+			com = ars.calcCOM(molecule_coms, dbox3s[i], excludeDummy)
 		elif ars.isinteger(center) and center <= nmolecule:
 			com = molecule_coms[center-1]
 		else:
@@ -2254,9 +2506,9 @@ def centerPointsMolecule(points, molecules, dbox3s, center=1, unwrap=True, repor
 			sys.exit()
 
 		### center the points
-		for j in range(npoint):
-			if not all(molecule_coms[molecules[j]-1]==0):
-				points_centered[i,j] = ars.applyPBC(points[i,j]-com, dbox3s[i])
+		per_point_coms = molecule_coms[molecules-1]
+		dummy = np.all(per_point_coms == 0, axis=1)
+		points_centered[i,~dummy] = ars.applyPBC(points[i,~dummy] - com, dbox3s[i])
 
 		### unwrap molecules at boundary
 		if unwrap:
@@ -2264,24 +2516,24 @@ def centerPointsMolecule(points, molecules, dbox3s, center=1, unwrap=True, repor
 			for j in range(nmolecule):
 				if not all(molecule_coms[j]==0):
 					molecule_coms_centered[j] = ars.applyPBC(molecule_coms[j]-com, dbox3s[i])
-			for j in range(npoint):
-				ref = molecule_coms_centered[molecules[j]-1]
-				points_centered[i,j] = ref + ars.applyPBC(points_centered[i,j]-ref, dbox3s[i])
+			refs = molecule_coms_centered[molecules-1]
+			points_centered[i] = refs + ars.applyPBC(points_centered[i]-refs, dbox3s[i])
 
-		### progress update
-		if report_every and (i+1)%report_every == 0:
-			print(f"centered {i+1} steps...")
+		### progress updates
+		if report: ars.updateStatusBar(i,nstep)
+
+	### remove time dimension from single frames
+	points_centered = ars.trimDims(points_centered, ndim_add)
 
 	### result
 	return points_centered
 
 
 ### shift trajectory, placing com of all beads at the center
-def centerPointsBead(points, dbox3s):
+def centerPointsBead(points, dbox3s, report=True, excludeDummy=False):
 
-	### notes
-	# particles located perfectly at the origin are assumed to be dummy, and are thus
-	  # not included in the center of mass calculation.
+	### add time dimension to single frames
+	points, ndim_add = ars.padDims(points)
 
 	### get counts
 	nstep = points.shape[0]
@@ -2297,26 +2549,34 @@ def centerPointsBead(points, dbox3s):
 		sys.exit()
 
 	### center points
-	print("Centering trajectory...")
+	if report: ars.initStatusBar("Centering")
 	points_centered = np.zeros((nstep,npoint,3))
 	for i in range(nstep):
-		com = ars.calcCOMnoDummy(points[i], dbox3s[i])
-		for j in range(npoint):
-			if not all(points[i,j]==0):
-				points_centered[i,j] = ars.applyPBC(points[i,j]-com, dbox3s[i])
+		com = ars.calcCOM(points[i], dbox3s[i], excludeDummy)
+		active = ~np.all(points[i] == 0, axis=1)
+		points_centered[i, active] = ars.applyPBC(points[i, active] - com, dbox3s[i])
+		if report: ars.updateStatusBar(i,nstep)
+
+	### remove time dimension from single frames
+	points_centered = ars.trimDims(points_centered, ndim_add)
+
+	### result
 	return points_centered
 
 
-### calculate center of mass, excluding dummy particle
-def calcCOMnoDummy(r, dbox3):
-	if ars.checkAllDummy(r):
-		return np.zeros(3)
-	mask_noDummy = ~np.all(r==0, axis=1)
-	return ars.calcCOM(r[mask_noDummy], dbox3)
+### calculate center of mass for trajectory
+def calcCOMs(points, dbox3):
+	nstep = points.shape[0]
+	nbead = points.shape[1]
+	coms = np.zeros((nstep,3))
+	for i in range(nstep):
+		coms[i] = ars.calcCOM(points[i],dbox3)
+	return coms
 
 
 ### calculate center of mass, using method from Bai and Breen 2008
-def calcCOM(r, dbox3):
+def calcCOM(r, dbox3, excludeDummy=False):
+	if excludeDummy and len(r.shape)>1: r = r[~np.all(r==0, axis=1)]
 	xi_bar = np.mean( np.cos(2*np.pi*(r/dbox3+1/2)), axis=0 )
 	zeta_bar = np.mean( np.sin(2*np.pi*(r/dbox3+1/2)), axis=0 )
 	theta_bar = np.arctan2(-zeta_bar, -xi_bar) + np.pi
@@ -2367,7 +2627,7 @@ def alignPCs(r, indices='all', axis_ranking=[0,1,2], getPCs=False):
 
 	### enforce right-handedness
 	if np.linalg.det(PCs_axisRanked) < 0:
-		PCs_axisRanked[:, -1] *= -1
+		PCs_axisRanked[:,-1] *= -1
 
 	### rotate positions, add back center
 	r_rot = r_centered @ PCs_axisRanked
@@ -2431,7 +2691,7 @@ def fractionalHist(data, bin_edges, alpha=1, limit_left='taper', limit_right='ta
 				elif frac < 1:
 					counts[-1] += ((1-frac)**alpha)/scale
 			elif limit_right == 'cut':
-				if x < centers[-1] + bin_width/1:
+				if x < centers[-1] + bin_width/2:
 					counts[-1] += 1.0
 			elif limit_right == 'extend':
 				counts[-1] += 1.0
@@ -2552,8 +2812,8 @@ def calcAutocorrSafe(A):
 		return acf
 	for k in range(1, len(A)):
 		v = valid[:-k] & valid[k:]
-		n_pairs = np.sum(v)
-		if n_pairs < 1:
+		npair = np.sum(v)
+		if npair < 1:
 			acf[k] = 0.0
 			continue
 		num = np.sum(Ac[:-k][v] * Ac[k:][v])
@@ -2688,11 +2948,67 @@ def getColor(color):
 		sys.exit()
 
 
+### get colormap that matches name
+def getCmap(name):
+
+	### try to find colormap
+	try:
+		return plt.get_cmap(name)
+	except ValueError:
+		pass
+
+	### try to find color
+	if mcolors.is_color_like(name):
+		color = mcolors.to_rgb(name)
+		return mcolors.LinearSegmentedColormap.from_list(name, [color, color])
+
+	### error
+	print("Error: Cound not find colormap or color.\n")
+	sys.exit()
+
+
 ### get softened version of color
 def soften(color, alpha):
-	rgb = np.array(to_rgb(color))
+	rgb = np.array(mcolors.to_rgb(color))
 	rgb_soft = alpha * rgb + (1 - alpha)
 	return tuple(rgb_soft)
+
+
+### print status bar header
+def initStatusBar(description, length=30):
+
+	### dynamic output
+	if sys.stdout.isatty():
+		print(f"{description}:")
+
+	### static output
+	else:
+		if len(description) > length-8:
+			print("Flag: Status bar description too long.")
+			description = description[:length-6]
+		pad = length - len(description) - 4
+		print(f"{'='*(length)}")
+		print(f"-- {description} {'-'*pad}")
+
+
+### print status bar during loop iterations
+def updateStatusBar(i, n, length=30, units='steps'):
+
+	### dynamic output
+	if sys.stdout.isatty():
+		if i < n-1:
+		 	print(f"\r-- {i+1}/{n} {units}", end='', flush=True)
+		else:
+			print(f"\r-- {n}/{n} {units}")
+
+	### static output
+	else:
+		nchar_before = length*i // n
+		nchar_after = length*(i+1) // n
+		nchar_add = nchar_after - nchar_before
+		print("=" * nchar_add, end='', flush=True)
+		if i == n-1:
+			print(flush=True)
 
 
 ### sort points into molecules
@@ -2704,10 +3020,10 @@ def sortPointsByMolecule(points, molecules):
 	for m in range(nmolecule):
 		points_moleculed[m] = np.zeros((nstep,sum(molecules==m+1),3))
 	for i in range(nstep):
-		n_molecule_count = np.zeros(nmolecule, dtype=int)
+		nmolecule_count = np.zeros(nmolecule, dtype=int)
 		for j in range(npoint):
-			points_moleculed[molecules[j]-1][i,n_molecule_count[molecules[j]-1]] = points[i,j]
-			n_molecule_count[molecules[j]-1] += 1
+			points_moleculed[molecules[j]-1][i,nmolecule_count[molecules[j]-1]] = points[i,j]
+			nmolecule_count[molecules[j]-1] += 1
 	return points_moleculed
 
 
@@ -2732,6 +3048,21 @@ def trimUS(op, PMF, PMF_err):
 	return op_trimmed, PMF_trimmed, PMF_err_trimmed
 
 
+### add empty dimensions to array until target number of dimensions reached
+def padDims(A, ndim=3):
+	ndim_add = max([0,ndim-len(A.shape)])
+	for i in range(ndim_add):
+		A = A[np.newaxis]
+	return A, ndim_add
+
+
+### remove specified dimensions from start of array
+def trimDims(A, ndim_trim=0):
+	for i in range(ndim_trim):
+		A = A[0]
+	return A
+
+
 ### determine if file exists
 def checkFileExist(file, name="the", required=True, requireData=False):
 	if os.path.isfile(file):
@@ -2749,6 +3080,12 @@ def checkFileExist(file, name="the", required=True, requireData=False):
 		else:
 			print(f"Flag: Could not find {name} file.")
 			return False
+
+
+### insert suffix before extension (last dot)
+def addSuffix(file, suffix):
+	base, ext = os.path.splitext(file)
+	return base + suffix + ext
 
 
 ### creates new folder, only if it doesn't already exist
@@ -2790,7 +3127,7 @@ def clipNorm(x, a, b):
 ### test if variable is numeric (both float and integer count)
 def isnumber(x):
 	try:
-		value = float(x)
+		float(x)
 		return True
 	except:
 		return False
@@ -2798,9 +3135,9 @@ def isnumber(x):
 
 ### test if variable is an integer (both python int and numpy int count)
 def isinteger(x):
-	if isinstance(x, int) or isinstance(x, np.int64):
-		return True
-	return False
+    if isinstance(x, int) or isinstance(x, np.int64):
+        return True
+    return False
 
 
 ### check if variable is an array (both list and numpy array count)

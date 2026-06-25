@@ -34,6 +34,9 @@ def main():
 	parser.add_argument('--nstep-skip',		type=int, default=0, 		help="number of recorded initial steps to skip")
 	parser.add_argument('--coarse-time',	type=int, default=1, 		help="coarse factor for time steps")
 	parser.add_argument('--center',			action='store_true',		help="whether to center the trajectory")
+	parser.add_argument('--split',			action='store_true',		help="whether split oxDNA particles into backbone and base beads")
+	parser.add_argument('--style',			type=str, default='mol', 	help="for lammps simulations, atom style in geometry file (mol, full, ox)")
+	parser.add_argument('--units',			type=str, default='nm', 	help="for lammps simuations, length scale of input data (nm, ang, ox)")
 
 	### set arguments
 	args = parser.parse_args()
@@ -43,15 +46,27 @@ def main():
 	clusterFile = args.clusterFile
 	nstep_skip = args.nstep_skip
 	coarse_time = args.coarse_time
+	style = args.style
+	units = args.units
 	center = args.center
+	split = args.split
 
 	### check for conflicting inputs
 	if geoFile is not None and oxFiles is not None:
 		print("Error: Must provide either geometry file or oxDNA files, not both.")
 		sys.exit()
 
+	### adjustments for split lammps simulation
+	if geoFile is not None and split: 
+		style = 'ox'
+		units = 'ang'
+
+
+################################################################################
+### Main
+
 	### output file parameters
-	outFold = "lammpified/"
+	outFold = "visualize/"
 	outGeoFile = outFold + "geometry.in"
 	outDatFile = outFold + "trajectory.dat"
 
@@ -62,53 +77,107 @@ def main():
 	if geoFile is not None:
 
 		### read geometry
-		output = ars.readGeo(geoFile,getDbox3=True)
-		if len(output) == 6:
-			points_init,molecules,types,bonds,_,dbox3 = output
-		elif len(output) == 7:
-			points_init,molecules,types,_,bonds,_,dbox3 = output
+		if style == 'mol':
+			points_init, molecules, types, bonds, _, dbox3 = ars.readGeo(geoFile, getDbox3=True, style=style)
+		elif style == 'full':
+			points_init, molecules, types, _, bonds, _, dbox3 = ars.readGeo(geoFile, getDbox3=True, style=style)
+		elif style == 'ox':
+			points_init, molecules, types, radii, quats_init, bonds, _, dbox3 = ars.readGeo(geoFile, getDbox3=True, style=style)
+		else:
+			print("Error: Unrecognized atom style.")
+			sys.exit()
 
 		### read trajectory
 		if datFile is not None:
-			points,col2s,dbox3s = ars.readAtomDump(datFile,nstep_skip,coarse_time,getDbox3s=True)
-			if center: points = ars.centerPointsMolecule(points,molecules,dbox3s,center='com',unwrap=False)
+			if not split:
+				points, _, dbox3s = ars.readAtomDump(datFile, nstep_skip, coarse_time, getDbox3s=True)
+			else:
+				points, _, dbox3s, quats = ars.readAtomDump(datFile, nstep_skip, coarse_time, getDbox3s=True, getQuats=True)
+
+		### unit conversion
+		scale = convertToNm(units)
+		points_init *= scale
+		dbox3 *= scale
+		if datFile is not None:
+			points *= scale
+			dbox3s *= scale
+
+		### center trajectory
+		if center:
+			points_init = ars.centerPointsMolecule(points_init, molecules, dbox3, center='com', unwrap=False)
+			if datFile is not None:
+				points = ars.centerPointsMolecule(points, molecules, dbox3s, center='com', unwrap=False)
 
 		### set colors
 		if clusterFile is not None:
-			npoint = points_init.shape[0]
 			clusters = ars.readCluster(clusterFile)
-			colors = getMoleculesFromClustersB1(clusters,npoint)
+			colors = getMoleculesFromClustersB1(clusters, len(types))
 		else:
 			colors = types
 
-		### write output
-		ars.writeGeo(outGeoFile,dbox3,points_init,types=colors,bonds=bonds,natomType=max(colors))
-		if datFile is not None:
-			ars.writeAtomDump(outDatFile,dbox3s,points,colors)
+		### beads
+		if not split:
+
+			### write output
+			ars.writeGeo(outGeoFile, dbox3, points_init, molecules, colors, bonds)
+			if datFile is not None:
+				ars.writeAtomDump(outDatFile, dbox3s, points, colors)
+
+		### nucleotides
+		else:
+
+			### split and write geometry
+			axes_init = quatsToAxes(quats_init)
+			points_init, quats_init, molecules, colors, radii, bonds = splitNucleotides(points_init, axes_init, molecules, colors, bonds)
+			ars.writeGeo(outGeoFile, dbox3, points_init, molecules, colors, bonds, radii=radii, quats=quats_init)
+
+			### split and write trajectory
+			if datFile is not None:
+				axes = quatsToAxes(quats)
+				points, quats = splitNucleotides(points, axes, molecules, colors, bonds)[:2]
+				ars.writeAtomDump(outDatFile, dbox3s, points, colors, quats=quats)
 
 	### lammpify oxdna
 	elif oxFiles is not None:
 
-		### read topology (required)
-		strands,bonds,nba_total = readTop(oxFiles[0])
+		### read topology
+		strands, bases, bonds, nba_total = readTop(oxFiles[0])
 
-		### read and center trajecotry
-		points,dbox3 = ars.readOxDNA(oxFiles[1],nstep_skip,coarse_time,getDbox3=True)
-		if center: points = ars.centerPointsMolecule(points,strands,dbox3,center='com',unwrap=True)
+		### read trajecotry
+		points, dbox3, axes = ars.readOxDNA(oxFiles[1], nstep_skip, coarse_time, getDbox3=True, getAxes=True)
+		nstep = points.shape[0]
+
+		### center trajectory
+		if center: points = ars.centerPointsMolecule(points, strands, dbox3, center='com', unwrap=True)
 
 		### set colors
 		if clusterFile is not None:
 			clusters = ars.readCluster(clusterFile)
-			colors = getMoleculesFromClustersB0(clusters,nba_total)
-		else:
+			colors = getMoleculesFromClustersB0(clusters, nba_total)
+		elif not split:
 			strand_scaffold = stats.mode(strands).mode
-			colors = np.where(strands == strand_scaffold, 1, 2)
+			colors = np.where(strands == strand_scaffold,1,2)
+		else:
+			colors = bases
 
-		### write output
-		dbox3s = np.ones((points.shape[0],3))*dbox3
-		ars.writeGeo(outGeoFile,dbox3s[0],points[0,:,:],types=colors,bonds=bonds,natomType=max(colors))
-		if points.shape[0] > 1:
-			ars.writeAtomDump(outDatFile,dbox3s,points,colors)
+		### beads
+		if not split:
+
+			### write output
+			ars.writeGeo(outGeoFile, dbox3, points[0], strands, colors, bonds)
+			if points.shape[0] > 1:
+				ars.writeAtomDump(outDatFile, dbox3, points, colors)
+
+		### nucleotides
+		else:
+
+			### split data
+			points, quats, strands, colors, radii, bonds = splitNucleotides(points, axes, strands, colors, bonds)
+
+			### write output
+			ars.writeGeo(outGeoFile, dbox3, points[0], strands, colors, bonds, radii=radii, quats=quats[0])
+			if nstep > 1:
+				ars.writeAtomDump(outDatFile, dbox3, points, colors, quats=quats)
 
 	### error
 	else:
@@ -121,28 +190,179 @@ def main():
 
 ### read oxdna topology
 def readTop(topFile):
-	ars.checkFileExist(topFile,"topology")
+	base_types = {'A':1, 'C':2, 'G':3, 'T':4}
+	ars.checkFileExist(topFile, "topology")
 	with open(topFile) as f:
 		content = f.readlines()
 	nba_total = int(content[0].split()[0])
 	strands = np.zeros(nba_total,dtype=int)
+	bases = np.zeros(nba_total,dtype=int)
 	bonds = np.ones((nba_total,3),dtype=int)
 	bond_count = 0
 	for i in range(nba_total):
-		strands[i] = int(content[i+1].split()[0])
+		line = content[i+1].split()
+		strands[i] = int(line[0])
+		bases[i] = base_types[line[1]]
 		if int(content[i+1].split()[3]) != -1:
 			bonds[bond_count,1] = i+1
-			bonds[bond_count,2] = int(content[i+1].split()[3])+1
+			bonds[bond_count,2] = int(line[3])+1
 			bond_count += 1
 	bonds = bonds[:bond_count,:]
-	return strands, bonds, nba_total
+	return strands, bases, bonds, nba_total
 
 
 ################################################################################
 ### Utility Functions
 
+### unit conversion factor to nm
+def convertToNm(units):
+
+	### parse unit type
+	if units == 'nm':
+		scale = 1
+	elif units == 'ox':
+		scale = 0.8518
+	elif units == 'ang':
+		scale = 0.1
+	else:
+		print("Error: Unrecognized input data units.")
+		sys.exit()
+
+	### result
+	return scale
+
+
+### split particles into backbone and base sites, adding appropriate bonds
+def splitNucleotides(points, axes, molecules, colors, bonds):
+
+	### add time dimension to single frames
+	points, ndim_add = ars.padDims(points)
+	axes = ars.padDims(axes, ndim=4)[0]
+
+	### counts
+	nstep = points.shape[0]
+	npoint = points.shape[1]
+
+	### initialize
+	points_split = np.zeros((nstep,npoint*2,3))
+	quats = np.zeros((nstep,npoint*2,4))
+	quats[:,:,0] = 1
+
+	### split position data
+	points_split[:,:npoint] = points + 0.8518*(-0.34*axes[:,:,0] + 0.3408*axes[:,:,1])
+	points_split[:,npoint:] = points + 0.8518*(0.4*axes[:,:,0])
+
+	### calculate orientation data
+	ars.initStatusBar("Calculating quaternions")
+	for i in range(nstep):
+		for j in range(npoint):
+			quats[i,npoint+j] = axesToQuat(axes[i,j])
+		ars.updateStatusBar(i,nstep)
+
+	### add base to backbone bonds
+	for j in range(npoint):
+		bonds = np.append(bonds,[[2,j+1,npoint+j+1]], axis=0)
+
+	### identification data
+	molecules = np.concatenate((molecules,molecules))
+	colors = np.concatenate((colors,colors))
+
+	### bead sizes
+	radii = np.full((npoint*2,3), 0.34)
+	radii[npoint:,2] = 0.17
+
+	### add time dimension to single frames
+	points_split = ars.trimDims(points_split, ndim_add)
+	quats = ars.trimDims(quats, ndim_add)
+
+	### results
+	return points_split, quats, molecules, colors, radii, bonds
+
+
+### convert coordinate axes to quaternion
+def axesToQuat(a):
+	q = np.zeros(4)
+
+	trace = a[0,0] + a[1,1] + a[2,2]
+	if trace > 0.0:
+		s = 0.5 / np.sqrt(trace + 1.0)
+		q[0] = 0.25 / s
+		q[1] = (a[1,2] - a[2,1]) * s
+		q[2] = (a[2,0] - a[0,2]) * s
+		q[3] = (a[0,1] - a[1,0]) * s
+
+	elif a[0,0] > a[1,1] and a[0,0] > a[2,2]:
+		s = 2.0 * np.sqrt(1.0 + a[0,0] - a[1,1] - a[2,2])
+		q[0] = (a[1,2] - a[2,1]) / s
+		q[1] = 0.25 * s
+		q[2] = (a[1,0] + a[0,1]) / s
+		q[3] = (a[2,0] + a[0,2]) / s
+
+	elif a[1,1] > a[2,2]:
+		s = 2.0 * np.sqrt(1.0 + a[1,1] - a[0,0] - a[2,2])
+		q[0] = (a[2,0] - a[0,2]) / s
+		q[1] = (a[1,0] + a[0,1]) / s
+		q[2] = 0.25 * s
+		q[3] = (a[2,1] + a[1,2]) / s
+
+	else:
+		s = 2.0 * np.sqrt(1.0 + a[2,2] - a[0,0] - a[1,1])
+		q[0] = (a[0,1] - a[1,0]) / s
+		q[1] = (a[2,0] + a[0,2]) / s
+		q[2] = (a[2,1] + a[1,2]) / s
+		q[3] = 0.25 * s
+
+	### result
+	return q
+
+
+### wrapper function for converting quaternion trajectory to coordinate axes trajectory
+def quatsToAxes(quats):
+
+	### add time dimension to single frames
+	quats, ndim_add = ars.padDims(quats)
+
+	### initialize
+	nstep = quats.shape[0]
+	npoint = quats.shape[1]
+	axes = np.zeros((nstep,npoint,3,3))
+
+	### calculations
+	ars.initStatusBar("Calculating axes")
+	for i in range(nstep):
+		for j in range(npoint):
+			axes[i,j] = quatToAxes(quats[i,j])
+		ars.updateStatusBar(i,nstep)
+
+	### add time dimension to single frames
+	quats = ars.trimDims(quats, ndim_add)
+
+	### result
+	return axes
+
+
+### convert quaternion to coordinate axes
+def quatToAxes(q):
+	a = np.zeros((3,3))
+
+	a[0,0] = q[0]*q[0] + q[1]*q[1] - q[2]*q[2] - q[3]*q[3]
+	a[0,1] = 2*(q[1]*q[2] + q[0]*q[3])
+	a[0,2] = 2*(q[1]*q[3] - q[0]*q[2])
+
+	a[1,0] = 2*(q[1]*q[2] - q[0]*q[3])
+	a[1,1] = q[0]*q[0] - q[1]*q[1] + q[2]*q[2] - q[3]*q[3]
+	a[1,2] = 2*(q[2]*q[3] + q[0]*q[1])
+
+	a[2,0] = 2*(q[1]*q[3] + q[0]*q[2])
+	a[2,1] = 2*(q[2]*q[3] - q[0]*q[1])
+	a[2,2] = q[0]*q[0] - q[1]*q[1] - q[2]*q[2] + q[3]*q[3]
+
+	### result
+	return a
+
+
 ### identify molecules (1 for unidentified, 2+ for molecule IDs)
-def getMoleculesFromClustersB0(clusters,npoint):
+def getMoleculesFromClustersB0(clusters, npoint):
 	molecules = np.ones(npoint,dtype=int)
 	for c in range(len(clusters)):
 		for j in range(len(clusters[c])):
@@ -155,7 +375,7 @@ def getMoleculesFromClustersB0(clusters,npoint):
 
 
 ### identify molecules (1 for unidentified, 2+ for molecule IDs)
-def getMoleculesFromClustersB1(clusters,npoint):
+def getMoleculesFromClustersB1(clusters, npoint):
 	molecules = np.ones(npoint,dtype=int)
 	for c in range(len(clusters)):
 		for j in range(len(clusters[c])):
