@@ -36,6 +36,17 @@ import ast
 
 
 ################################################################################
+### Constants
+
+NA = 6.022e23
+kB_kcal = 0.001987
+ox2nm = 0.8518
+nm2ox = 1/0.8518
+ox2kcal = 8.22
+kcal2ox = 1/8.22
+
+
+################################################################################
 ### File Readers
 
 ### read oxdna trajectory
@@ -49,6 +60,7 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 	getAxes				= False		if 'getAxes' not in kwargs else kwargs['getAxes']
 	getDbox3 			= False		if 'getDbox3' not in kwargs else kwargs['getDbox3']
 	getStepsPerFrame	= False		if 'getStepsPerFrame' not in kwargs else kwargs['getStepsPerFrame']
+	keepOxUnits			= False		if 'keepOxUnits' not in kwargs else kwargs['keepOxUnits']
 
 	### notes
 	# assumes the bais array stores the base indices starting from 0.
@@ -115,6 +127,7 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 	print("{:1.2e} steps for analysis".format(nstep_use))
 
 	### determine bases to use
+	getGroups = False
 	if isinstance(bais, str) and bais == 'all':
 		bais = [range(int(np.ceil(nba_total/coarse_points)))]
 	elif ars.isinteger(bais):
@@ -122,6 +135,7 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 	elif ars.isarray(bais) and ars.isinteger(bais[0]):
 		bais = [bais[::coarse_points]]
 	elif ars.isarray(bais) and ars.isarray(bais[0]) and ars.isinteger(bais[0][0]):
+		getGroups = True
 		for i in range(len(bais)):
 			bais[i] = bais[i][::coarse_points]
 	else:
@@ -145,8 +159,8 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 
 	### initialize
 	points = np.zeros((nstep_use,nba_use,3))
-	groups = np.zeros(nba_use, dtype=int)
-	axes = np.zeros((nstep_use,nba_use,3,3))
+	if getGroups: groups = np.zeros(nba_use, dtype=int)
+	if getAxes: axes = np.zeros((nstep_use,nba_use,3,3))
 
 	### extract the data
 	ars.initStatusBar("Reading file")
@@ -177,7 +191,7 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 						sys.exit()
 
 					### set group
-					if si == 0:
+					if getGroups and si == 0:
 						groups[pi] = g + 1
 
 					### read values
@@ -236,13 +250,14 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 		print(f"Flag: Backbone bond exceeded max value {stretched_count} times.")
 
 	### oxDNA units to nm
-	points *= 0.8518
-	dbox3 *= 0.8518
+	if not keepOxUnits:
+		points *= ars.ox2nm
+		dbox3 *= ars.ox2nm
 
 	### result
 	output = [ points, dbox3[0] ]
 	if getDbox3: output[-1] = dbox3
-	if len(bais) > 1: output.append(groups)
+	if getGroups: output.append(groups)
 	if getAxes: output.append(axes)
 	if getStepsPerFrame: output.append(steps_per_frame*coarse_time)
 	return output
@@ -253,22 +268,29 @@ def readAtomDump(datFile, nstep_skip=0, coarse_time=1, bdis='all', coarse_points
 	
 	### additional keyword args
 	ignorePBC			= False		if 'ignorePBC' not in kwargs else kwargs['ignorePBC']
-	getCol2s			= True		if 'getCol2s' not in kwargs else kwargs['getCol2s']
 	getDbox3s			= False		if 'getDbox3s' not in kwargs else kwargs['getDbox3s']
 	getQuats			= False		if 'getQuats' not in kwargs else kwargs['getQuats']
+	extra_colIDs		= None		if 'extra_colIDs' not in kwargs else kwargs['extra_colIDs']
+	staticExtra			= False		if 'staticExtra' not in kwargs else kwargs['staticExtra']
 	getStepsPerFrame	= False		if 'getStepsPerFrame' not in kwargs else kwargs['getStepsPerFrame']
-	
+
 	### notes
 	# assumes the bdis array stores the atom indices starting from 1.
 	# assumes the dump frequency never changes, which it never should.
-	# assumes there are five columns (id, col2, xs, ys, zs).
 	# unless instructed otherwise, returns only first dimension of box diameter in first timestep.
 	# all three dimensions of the box are extracted each timestep and used to get the points.
-	# the returned points are centered about the origin, even if of the extracted values are not.
 
 	### check for file
 	print("Reading LAMMPS-style trajectory...")
 	ars.checkFileExist(datFile, "trajectory")
+
+	### interpret input
+	getExtra = False
+	if extra_colIDs is not None:
+		getExtra = True
+		if not ars.isarray(extra_colIDs):
+			extra_colIDs = [extra_colIDs]
+		nextra = len(extra_colIDs)
 
 	### count lines
 	with open(datFile, 'rb') as f:
@@ -291,9 +313,16 @@ def readAtomDump(datFile, nstep_skip=0, coarse_time=1, bdis='all', coarse_points
 		step_init = int(header[1].split()[0])
 		nbd_total = int(header[3].split()[0])
 
-		### parse columns
+		### initialize columns
 		col_x = None
 		col_quat = None
+		if getExtra:
+			cols_extra = nextra*[None]
+			for i,colID in enumerate(extra_colIDs):
+				if ars.isnumber(colID):
+					cols_extra[i] = int(colID)-1
+
+		### parse columns
 		line = header[8].split()
 		for i in range(2,len(line)):
 			if line[i] == 'xs':
@@ -304,12 +333,21 @@ def readAtomDump(datFile, nstep_skip=0, coarse_time=1, bdis='all', coarse_points
 				col_x = i-2
 			elif line[i] == 'c_quat[1]':
 				col_quat = i-2
+			elif getExtra:
+				for j,colID in enumerate(extra_colIDs):
+					if not ars.isnumber(colID) and line[i] == colID:
+						cols_extra[j] = i-2
+
 		if col_x is None:
-			print("Error: No position data found.")
+			print("Error: No position column found.")
 			sys.exit()
 		if getQuats and col_quat is None:
-			print("Error: No quaternion data found.")
+			print("Error: No quaternion column found.")
 			sys.exit()
+		if getExtra:
+			if any(c is None for c in cols_extra):
+				print("Error: Could not find one or more extra item columns.")
+				sys.exit()
 
 		### look for next frame
 		steps_per_frame = 0
@@ -339,6 +377,7 @@ def readAtomDump(datFile, nstep_skip=0, coarse_time=1, bdis='all', coarse_points
 	print("{:1.2e} steps for analysis".format(nstep_use))
 
 	### interpret input
+	getGroups = False
 	if isinstance(bdis, str) and bdis == 'all':
 		bdis = [list(range(1,int(np.ceil(nbd_total/coarse_points))+1))]
 	elif ars.isinteger(bdis):
@@ -346,6 +385,7 @@ def readAtomDump(datFile, nstep_skip=0, coarse_time=1, bdis='all', coarse_points
 	elif ars.isarray(bdis) and ars.isinteger(bdis[0]):
 		bdis = [bdis[::coarse_points]]
 	elif ars.isarray(bdis) and ars.isarray(bdis[0]) and ars.isinteger(bdis[0][0]):
+		getGroups = True
 		for i in range(len(bdis)):
 			bdis[i] = bdis[i][::coarse_points]
 	else:
@@ -359,10 +399,11 @@ def readAtomDump(datFile, nstep_skip=0, coarse_time=1, bdis='all', coarse_points
 
 	### initialize
 	points = np.zeros((nstep_use,nbd_use,3))
-	col2s = np.zeros(nbd_use, dtype=int)
 	dbox3s = np.zeros((nstep_use,3))
-	groups = np.zeros(nbd_use, dtype=int)
-	quats = np.zeros((nstep_use,nbd_use,4))
+	if getGroups: groups = np.zeros(nbd_use, dtype=int)
+	if getQuats: quats = np.zeros((nstep_use,nbd_use,4))
+	if getExtra: extras = np.zeros((nstep_use,nbd_use,nextra))
+	if staticExtra: extras = extras[0]
 
 	### extract the data
 	ars.initStatusBar("Reading file")
@@ -398,8 +439,11 @@ def readAtomDump(datFile, nstep_skip=0, coarse_time=1, bdis='all', coarse_points
 
 					### read descriptors
 					if si == 0:
-						col2s[pi] = int(line[1])
-						groups[pi] = g + 1
+						if getGroups:
+							groups[pi] = g + 1
+						if staticExtra:
+							for k in range(nextra):
+								extras[pi,k] = line[cols_extra[k]]
 
 					### read positions
 					points[si,pi] = np.array(line[col_x:col_x+3],dtype=float)
@@ -409,6 +453,11 @@ def readAtomDump(datFile, nstep_skip=0, coarse_time=1, bdis='all', coarse_points
 					### read orientations
 					if getQuats:
 						quats[si,pi] = np.array(line[col_quat:col_quat+4],dtype=float)
+
+					### read extra data
+					if getExtra and not staticExtra:
+						for k in range(nextra):
+							extras[si,pi,k] = line[cols_extra[k]]
 
 					### increment
 					pi += 1
@@ -426,13 +475,16 @@ def readAtomDump(datFile, nstep_skip=0, coarse_time=1, bdis='all', coarse_points
 			else:
 				si += 1
 
+	### remove useless dimension
+	if getExtra and nextra == 1:
+		extras = np.squeeze(extras,axis=-1)
+
 	### results
-	output = [ points ]
-	if getCol2s: output.append(col2s)
-	output.append(dbox3s[0,0])
+	output = [ points, dbox3s[0,0] ]
 	if getDbox3s: output[-1] = dbox3s
-	if len(bdis) > 1: output.append(groups)
+	if getGroups: output.append(groups)
 	if getQuats: output.append(quats)
+	if getExtra: output.append(extras)
 	if getStepsPerFrame: output.append(steps_per_frame*coarse_time)
 	return output
 
@@ -607,8 +659,10 @@ def readGeo(geoFile, **kwargs):
 	### keyword arguments
 	style		= 'mol'	if 'style' not in kwargs else kwargs['style']
 	extraLabel	= None	if 'extraLabel' not in kwargs else kwargs['extraLabel']
-	getDbox		= None	if 'getDbox' not in kwargs else kwargs['getDbox']
-	getDbox3	= None	if 'getDbox3' not in kwargs else kwargs['getDbox3']
+	getDbox3	= False	if 'getDbox3' not in kwargs else kwargs['getDbox3']
+	getCharges	= False	if 'getCharges' not in kwargs else kwargs['getCharges']
+	getBonds	= False if 'getBonds' not in kwargs else kwargs['getBonds']
+	getAngles	= False if 'getAngles' not in kwargs else kwargs['getAnlges']
 
 	### notes
 	# all indices are stored directly as they appear in the geometry file; in
@@ -643,25 +697,28 @@ def readGeo(geoFile, **kwargs):
 				nangle = 0
 
 	### get box diameter
-	if getDbox or getDbox3:
-		dbox3 = np.zeros(3)
-		for i in range(len(content)):
-			line = content[i].split()
-			if len(line) == 4 and line[2] == 'xlo':
-				dbox3[0] = float(line[1]) - float(line[0])
-			if len(line) == 4 and line[2] == 'ylo':
-				dbox3[1] = float(line[1]) - float(line[0])
-			if len(line) == 4 and line[2] == 'zlo':
-				dbox3[2] = float(line[1]) - float(line[0])
-			if all(dbox3>0):
-				break
+	dbox3 = np.zeros(3)
+	for i in range(len(content)):
+		line = content[i].split()
+		if len(line) == 4 and line[2] == 'xlo':
+			dbox3[0] = float(line[1]) - float(line[0])
+		if len(line) == 4 and line[2] == 'ylo':
+			dbox3[1] = float(line[1]) - float(line[0])
+		if len(line) == 4 and line[2] == 'zlo':
+			dbox3[2] = float(line[1]) - float(line[0])
+		if all(dbox3>0):
+			break
 
-	### get atom information
+	### initialize
 	r = np.zeros((natom,3))
 	ids = np.zeros(natom, dtype=int)
 	molecules = np.zeros(natom, dtype=int)
 	types = np.zeros(natom, dtype=int)
-	charges = np.zeros(natom)
+	if getCharges: charges = np.zeros(natom)
+	if getBonds: bonds = np.zeros((nbond,3), dtype=int)
+	if getAngles: angles = np.zeros((nangle,4), dtype=int)
+
+	### get atom information
 	if natom:
 		for i in range(len(content)):
 			if len(content[i].split()) > 0 and content[i].split()[0] == 'Atoms':
@@ -690,8 +747,9 @@ def readGeo(geoFile, **kwargs):
 					sys.exit()
 				molecules[ai] = line[1]
 				types[ai] = line[2]
-				charges[ai] = line[3]
 				r[ai] = line[4:7]
+				if getCharges:
+					charges[ai] = line[3]
 
 			### gather data for ox atom style
 			elif style == 'ox':
@@ -708,8 +766,7 @@ def readGeo(geoFile, **kwargs):
 				sys.exit()
 
 	### get bond information
-	bonds = np.zeros((nbond,3), dtype=int)
-	if nbond:
+	if getBonds and nbond:
 		for i in range(len(content)):
 			if len(content[i].split()) > 0 and content[i].split()[0] == 'Bonds':
 				line_idx = i+2
@@ -722,8 +779,7 @@ def readGeo(geoFile, **kwargs):
 			line_idx += 1
 
 	### get angle information
-	angles = np.zeros((nangle,4), dtype=int)
-	if nangle:
+	if getAngles and nangle:
 		for i in range(len(content)):
 			if len(content[i].split()) > 0 and content[i].split()[0] == 'Angles':
 				line_idx = i+2
@@ -779,15 +835,16 @@ def readGeo(geoFile, **kwargs):
 			line_idx += 1
 
 	### results
-	output = [ r, molecules, types ]
-	if style == 'full': output.append(charges)
+	output = [ r, dbox3[0] ]
+	if getDbox3: output[-1] = dbox3
+	output.append(molecules)
+	output.append(types)
+	if getCharges: output.append(charges)
 	if style == 'ox': output.append(radii)
 	if style == 'ox': output.append(quats)
-	output.append(bonds)
-	output.append(angles)
+	if getBonds: output.append(bonds)
+	if getAngles: output.append(angles)
 	if extraLabel is not None: output.append(extras)
-	if getDbox: output.append(dbox3[0])
-	if getDbox3: output.append(dbox3)
 	return output
 
 
@@ -796,14 +853,35 @@ def readWham(whamFile, nbin):
 	ars.checkFileExist(whamFile, "wham")
 	with open(whamFile, 'r') as f:
 		content = f.readlines()
+	content = ars.cleanFileContent(content)
 	op = np.zeros(nbin)
 	PMF = np.zeros(nbin)
 	PMF_err = np.zeros(nbin)
 	for i in range(nbin):
-		op[i] = content[i+2].split()[0]
-		PMF[i] = content[i+2].split()[1]
-		PMF_err[i] = content[i+2].split()[2]
+		op[i] = content[i].split()[0]
+		PMF[i] = content[i].split()[1]
+		PMF_err[i] = content[i].split()[2]
 	return op, PMF, PMF_err
+
+
+### read wham-2d output
+def readWham2D(whamFile, nbin):
+	ars.checkFileExist(whamFile, "wham")
+	with open(whamFile, 'r') as f:
+		content = f.readlines()
+	content = ars.cleanFileContent(content)
+	op1 = np.zeros((nbin,nbin))
+	op2 = np.zeros((nbin,nbin))
+	PMF = np.zeros((nbin,nbin))
+	for i in range(nbin):
+		for j in range(nbin):
+			line = content[i*nbin+j].split()
+			op1[j,i] = line[0]
+			op2[j,i] = line[1]
+			PMF[j,i] = line[2]
+			if PMF[j,i] > 1E6:
+				PMF[j,i] = None
+	return op1, op2, PMF
 
 
 ### read my umbrella sampling metadata file
@@ -819,6 +897,26 @@ def readUSmeta(metaFile):
 		OPs_eq[i] = float(content[i+1].split()[0])
 		weights[i] = float(content[i+1].split()[1])
 	return OPs_eq, weights
+
+
+### read my umbrella sampling metadata file
+def readUSmeta2D(metaFile):
+	ars.checkFileExist(metaFile, "metadata")
+	with open(metaFile, 'r') as f:
+		content = f.readlines()
+	content = ars.cleanFileContent(content)
+	nsim = len(content)-1
+	op1s_eq = np.zeros(nsim)
+	w1s = np.zeros(nsim)
+	op2s_eq = np.zeros(nsim)
+	w2s = np.zeros(nsim)
+	for i in range(nsim):
+		op1s_eq[i] = float(content[i+1].split()[0])
+		w1s[i] = float(content[i+1].split()[1])
+		op2s_eq[i] = float(content[i+1].split()[2])
+		w2s[i] = float(content[i+1].split()[3])
+	return op1s_eq, w1s, op2s_eq, w2s
+
 
 
 ### read cluster file
@@ -876,7 +974,7 @@ def cleanFileContent(content):
 	return cleaned
 
 
-### search given file for references to arsenal functions
+### search given file for references to arsenal functions and constants
 def findArsReferences(searchFile=sys.argv[0], hush=False):
 
 	### read content of search file
@@ -885,14 +983,18 @@ def findArsReferences(searchFile=sys.argv[0], hush=False):
 		content = f.read()
 
 	### look for arsenal references in the search file
-	pattern = r'\bars\.(\w+)\('
-	ars_refs = list(set(re.findall(pattern, content)))
+	tree = ast.parse(content)
+	ars_refs = set()
+	for node in ast.walk(tree):
+		if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "ars":
+			ars_refs.add(node.attr)
 	if "findArsReferences" in ars_refs:
 		ars_refs.remove("findArsReferences")
+	ars_refs = list(ars_refs)
 
 	### print the results
 	if not hush:
-		print("Arsenal references:")
+		print(f"Arsenal references in {os.path.basename(searchFile)}:")
 		for i in range(len(ars_refs)):
 			print(f"- {ars_refs[i]}")
 	return ars_refs
@@ -1194,6 +1296,12 @@ def writeGeo(geoFile, dbox3, r, molecules='auto', types='auto', bonds=None, angl
 				f.write("\n")
 
 
+### load array of variables into pickle file
+def makePickle(pklFile, cucumber):
+	with open(pklFile, 'wb') as f:
+		pickle.dump(cucumber, f)
+
+
 ### load array of variables from pickle file
 def unpickle(pklFile, dims=None, hushExtraFlag=False):
 
@@ -1249,27 +1357,38 @@ def unpickle(pklFile, dims=None, hushExtraFlag=False):
 	return cucumber
 
 
-### create arsenal file that contains only the functions necessary for the scripts in a given folder
-def deployArsenal(srcFold=os.getcwd()+"/"):
-
+### create arsenal file that contains only the functions/constants necessary for the scripts in a given folder
+def deployArsenal(srcFold=None):
+	
 	### location of arsenal file and deployed arsenal file
+	if srcFold is None:
+		srcFold = os.getcwd() + "/"
 	arsFile = "/Users/dduke/Programs/arsenal/arsenal.py"
 	arsDepFile = srcFold + "armament.py"
+
+	### remove old deployed arsenal file
+	if ars.checkFileExist(arsDepFile, "deployed arsenal", required=False, hush=True):
+		os.remove(arsDepFile)
 
 	### get arsenal code
 	checkFileExist(arsFile, 'arsenal')
 	with open(arsFile, 'r') as f:
 		ars_code = f.readlines()
-
-	### gather all arsenal function definitions
+	
+	### gather all arsenal top-level function definitions and constants
 	ars_tree = ast.parse("".join(ars_code))
 	ars_functions = {}
-	for node in ast.walk(ars_tree):
+	ars_constants = {}
+	for node in ars_tree.body:
 		if isinstance(node, ast.FunctionDef) and node.name != "deployArsenal":
 			start_line = node.lineno - 2
 			end_line = max(child.end_lineno for child in ast.walk(node) if hasattr(child, 'end_lineno'))
 			ars_functions[node.name] = (start_line, end_line)
-
+		elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+			target = node.targets[0] if isinstance(node, ast.Assign) else node.target
+			if isinstance(target, ast.Name):
+				ars_constants[target.id] = node.lineno - 1
+	
 	### find all arsenal references
 	ars_refs = []    
 	for root, dirs, files in os.walk(srcFold):
@@ -1278,10 +1397,18 @@ def deployArsenal(srcFold=os.getcwd()+"/"):
 			if file.endswith(".py"):
 				srcFile = os.path.join(root, file)
 				ars_refs.extend(ars.findArsReferences(srcFile, hush=True))
-
+	
 	### write deployed arsenal file
 	deployed_functions = []
+	deployed_constants = []
 	with open(arsDepFile, 'w') as f:
+		for const in ars_constants.keys():
+			if const in ars_refs:
+				deployed_constants.append(const)
+				line = ars_constants[const]
+				f.writelines(ars_code[line:line + 1])
+		if deployed_constants:
+			f.write("\n")
 		for func in ars_functions.keys():
 			if func in ars_refs:
 				deployed_functions.append(func)
@@ -1292,10 +1419,25 @@ def deployArsenal(srcFold=os.getcwd()+"/"):
 	### check for self-references
 	while True:
 		ars_refs = ars.findArsReferences(arsDepFile, hush=True)
-		ars_refs = [item for item in ars_refs if item not in set(deployed_functions)]
+		deployed_names = set(deployed_functions) | set(deployed_constants)
+		ars_refs = [item for item in ars_refs if item not in deployed_names]
+		
+		### check for references to unknown functions/constants
+		unknown_refs = [item for item in ars_refs if item not in ars_functions and item not in ars_constants]
+		if unknown_refs:
+			print(f"Warning: referenced but not found in arsenal.py, skipping: {unknown_refs}")
+			sys.exit()
+
+		### parse references
 		if len(ars_refs) == 0:
 			break
 		with open(arsDepFile, 'a') as f:
+			for const in ars_constants.keys():
+				if const in ars_refs:
+					deployed_constants.append(const)
+					line = ars_constants[const]
+					f.writelines(ars_code[line:line + 1])
+					f.write("\n\n")
 			for func in ars_functions.keys():
 				if func in ars_refs:
 					deployed_functions.append(func)
@@ -1307,13 +1449,13 @@ def deployArsenal(srcFold=os.getcwd()+"/"):
 	with open(arsDepFile, 'r') as f:
 		ars_dep_code = f.readlines()
 	ars_dep_tree = ast.parse("".join(ars_dep_code))
-
+	
 	### extract all function references in deployed arsenal
 	all_refs = set()
 	for node in ast.walk(ars_dep_tree):
 		if isinstance(node, ast.Name):
 			all_refs.add(node.id)
-
+	
 	### extract initial imports in arsenal code
 	imports = []
 	for i, line in enumerate(ars_code):
@@ -1324,11 +1466,11 @@ def deployArsenal(srcFold=os.getcwd()+"/"):
 				imports.append("import armament as ars")
 			else:
 				imports.append(line.strip())
-
+	
 	### compile list of imports referenced in deployed arsenal
 	used_imports = []
 	for imp in imports:
-
+		
 		### handle "from module import ..."
 		if imp.startswith("from"):
 			module, _, items = imp.partition("import")
@@ -1337,15 +1479,15 @@ def deployArsenal(srcFold=os.getcwd()+"/"):
 			used_items = [item for item in items if item.split()[0] in all_refs]
 			if used_items:
 				used_imports.append(f"from {module} import {', '.join(used_items)}")
-
+		
 		### handle "import module" or "import module as alias"
 		elif imp.startswith("import"):
 			parts = imp[7:].strip().split(" as ")
 			module = parts[0].strip()
 			alias = parts[1].strip() if len(parts) > 1 else module
-			if module in all_refs or alias in all_refs or any(alias + "." in name or module + "." in name for name in all_refs):
+			if module in all_refs or alias in all_refs:
 				used_imports.append(imp)
-
+	
 	### re-write deployed arsenal with the used imports
 	with open(arsDepFile, 'w') as f:
 		f.writelines(line + "\n" for line in used_imports)
@@ -1361,9 +1503,8 @@ def magicPlot(pubReady=False, useTex=False, **kwargs):
 
 	### additional keyword args
 	font		= None		if 'font' not in kwargs else kwargs['font']
-	size		= (8,6)		if 'size' not in kwargs else kwargs['size']
-	shift_x		= 0			if 'shift_x' not in kwargs else kwargs['shift_x']
-	shift_y		= 0			if 'shift_y' not in kwargs else kwargs['shift_y']
+	pad_x		= 0			if 'pad_x' not in kwargs else kwargs['pad_x']
+	pad_y		= 0			if 'pad_y' not in kwargs else kwargs['pad_y']
 	
 	### determine font size
 	if not pubReady:
@@ -1378,10 +1519,8 @@ def magicPlot(pubReady=False, useTex=False, **kwargs):
 		else:
 			font = 'Times'
 
-	### determine whether to set box
-	setBox = False
-	if size == (8,6):
-		setBox = True
+	### calculate size
+	size = 8+pad_x, 6+pad_y
 
 	### set default magic settings
 	params = {
@@ -1402,41 +1541,67 @@ def magicPlot(pubReady=False, useTex=False, **kwargs):
 	}
 	plt.rcParams.update(params)
 
-	if setBox:
-		params = {
-			'figure.subplot.left'	: (0.125*8+shift_x)/size[0],
-			'figure.subplot.right'	: (0.9*8+shift_x)/size[0],
-			'figure.subplot.bottom'	: (0.1*6+shift_y)/size[1],
-			'figure.subplot.top'	: (0.9*6+shift_y)/size[1]
-		}
-		plt.rcParams.update(params)
+
+### wrapper for showing plots
+def show():
+	plt.show()
 
 
 ### set up figure
-def initFig(figLabel='auto', Xlabel=None, Ylabel=None, Xlim=None, Ylim=None, title=None, ax=None, figLabelAuto="Figure"):
+def initFig(figLabel='auto', Xlabel=None, Ylabel=None, Xlim=None, Ylim=None, title=None, ax=None, figLabelAuto="Figure", setBox=True, **kwargs):
+
+	### additional keyword args
+	getAx			= False		if 'getAx' not in kwargs else kwargs['getAx']
+	projection		= None		if 'projection' not in kwargs else kwargs['projection']
+	Zlabel			= None		if 'Zlabel' not in kwargs else kwargs['Zlabel']
+	shift_x			= 0			if 'shift_x' not in kwargs else kwargs['shift_x']
+	shift_y			= 0			if 'shift_y' not in kwargs else kwargs['shift_y']
+	scale_x			= 1			if 'scale_x' not in kwargs else kwargs['scale_x']
+	scale_y			= 1			if 'scale_y' not in kwargs else kwargs['scale_y']
 
 	### initialize figure
 	if ax is not None:
 		plt.sca(ax)
+		fig = plt.gcf()
 		if figLabel != 'auto' and figLabel != figLabelAuto:
 			print("Warning: Unused figure label input.")
 	else:
 		if figLabel == 'auto':
-			plt.figure(figLabelAuto)
+			fig = plt.figure(figLabelAuto)
 		else:
-			plt.figure(figLabel)
+			fig = plt.figure(str(figLabel))
+		if fig.axes:
+			ax = fig.axes[0]
+		else:
+			ax = fig.add_subplot(projection=projection)
+
+	### position axis
+	size = fig.get_size_inches()
+	x0 = 1/size[0]*( shift_x + 0.125*8 )
+	dx = 1/size[0]*( scale_x*0.775*8 )
+	y0 = 1/size[1]*( shift_y + 0.1*6 )
+	dy = 1/size[1]*( scale_y*0.8*6 )
+	ax.set_position([x0, y0, dx, dy])
 
 	### configure figure
 	if Xlim is not None:
-		plt.xlim(Xlim)
+		ax.set_xlim(Xlim)
 	if Ylim is not None:
-		plt.ylim(Ylim)
+		ax.set_ylim(Ylim)
 	if Xlabel is not None:
-		plt.xlabel(Xlabel)
+		ax.set_xlabel(Xlabel)
 	if Ylabel is not None:
-		plt.ylabel(Ylabel)
+		ax.set_ylabel(Ylabel)
+	if Zlabel is not None:
+		ax.set_zlabel(Zlabel)
 	if title is not None:
-		plt.title(title)
+		ax.set_title(title)
+
+	### results
+	output = [ fig ]
+	if getAx: output.append(ax)
+	if len(output) == 1: output = output[0]
+	return output
 
 
 ### plot the convergence of a varaible
@@ -1492,7 +1657,7 @@ def plotConv(A, figLabel='auto', Alabel=None, Alim='auto', title=None, **kwargs)
 			sem[i] = ars.calcSEMautocorr(A[0:i+1], hush=True)
 
 	### initialize figure
-	ars.initFig(figLabel, Xlabel, Alabel, Xlim, Alim, title, ax, "Conv")
+	ars.initFig(figLabel, Xlabel, Alabel, Xlim, Alim, title, ax, "Conv", False)
 
 	### plot data
 	if not plotAsLine:
@@ -1504,6 +1669,9 @@ def plotConv(A, figLabel='auto', Alabel=None, Alim='auto', title=None, **kwargs)
 	plt.plot(time, avg, color='purple')
 	plt.fill_between(time, avg+sem, avg-sem, color='purple', alpha=0.3, linewidth=0)
 	plt.legend(['Data','Mean','SEM'], loc='lower right')
+
+	### result
+	return avg[-1], sem[-1]
 
 
 ### plot a some nice points
@@ -1534,7 +1702,7 @@ def plotPoints(X, Y, figLabel='auto', Xlabel=None, Ylabel=None, Xlim=None, Ylim=
 		S = S**2 
 
 	### initialize figure
-	ars.initFig(figLabel, Xlabel, Ylabel, Xlim, Ylim, title, ax, "Points")
+	ars.initFig(figLabel, Xlabel, Ylabel, Xlim, Ylim, title, ax, "Points", False)
 
 	### plot points
 	plt.scatter(X, Y, S, marker=marker, color=color, edgecolor=edgecolor, linewidths=edgewidth, alpha=alpha, zorder=zorder, label=label)
@@ -1549,7 +1717,7 @@ def plotPoints(X, Y, figLabel='auto', Xlabel=None, Ylabel=None, Xlim=None, Ylim=
 
 
 ### plot a nice line
-def plotLine(X, Y, figLabel='auto', Xlabel=None, Ylabel=None, Xlim=None, Ylim=None, title=None, **kwargs):
+def plotLine(X, Y=None, figLabel='auto', Xlabel=None, Ylabel=None, Xlim=None, Ylim=None, title=None, **kwargs):
 
 	### additional keyword args
 	color			= None		if 'color' not in kwargs else kwargs['color']
@@ -1567,6 +1735,11 @@ def plotLine(X, Y, figLabel='auto', Xlabel=None, Ylabel=None, Xlim=None, Ylim=No
 	errlinewidth	= None		if 'errlinewidth' not in kwargs else kwargs['errlinewidth']
 	shadeE			= False		if 'shadeE' not in kwargs else kwargs['shadeE']
 	ax				= None		if 'ax' not in kwargs else kwargs['ax']
+
+	### make up X
+	if Y is None:
+		Y = X
+		X = np.arange(len(Y))
 
 	### numpify data
 	X = np.asarray(X, dtype=float)
@@ -1587,7 +1760,7 @@ def plotLine(X, Y, figLabel='auto', Xlabel=None, Ylabel=None, Xlim=None, Ylim=No
 		return
 
 	### initialize figure
-	ars.initFig(figLabel, Xlabel, Ylabel, Xlim, Ylim, title, ax, "Line")
+	ars.initFig(figLabel, Xlabel, Ylabel, Xlim, Ylim, title, ax, "Line", False)
 
 	### plot line
 	line = plt.plot(X, Y, color=color, linestyle=linestyle, linewidth=linewidth, marker=marker, markersize=markersize, mew=markeredgewidth, mec=markeredgecolor, mfc=markerfacecolor, alpha=alpha, zorder=zorder,label=label)[0]
@@ -1644,7 +1817,7 @@ def plotDists(As, figLabel='auto', Alabel=None, Alim=None, title=None, **kwargs)
 	meds = [ np.median(A) for A in As ]
 
 	### initialize figure
-	ars.initFig(figLabel, Xlabel, Alabel, Xlim, Alim, title, ax, "Dists")
+	ars.initFig(figLabel, Xlabel, Alabel, Xlim, Alim, title, ax, "Dists", False)
 
 	### point plot
 	if plotPoints:
@@ -1943,7 +2116,7 @@ def plotHist(A, figLabel='auto', Alabel=None, nbin='auto', Alim_bin='auto', Alim
 	isDataLabeled = True if label is None else False
 
 	### initialize figure
-	ars.initFig(figLabel, Alabel, Ylabel, Alim_plot, None, title, ax, "Hist")
+	ars.initFig(figLabel, Alabel, Ylabel, Alim_plot, None, title, ax, "Hist", False)
 
 	### plot data as bins
 	if plotBins:
@@ -2134,6 +2307,9 @@ def plotHist(A, figLabel='auto', Alabel=None, nbin='auto', Alim_bin='auto', Alim
 	if legend:
 		plt.legend()
 
+	### result
+	return centers, heights
+
 
 ### plot a nice 2D histogram
 def plotHist2D(A, B, figLabel='auto', Alabel=None, Blabel=None, nbin='auto', Alim_bin='auto', Blim_bin='auto', Alim_plot='auto', Blim_plot='auto', title=None, **kwargs):
@@ -2156,11 +2332,17 @@ def plotHist2D(A, B, figLabel='auto', Alabel=None, Blabel=None, nbin='auto', Ali
 		return
 	if isinstance(Alim_bin, str) and Alim_bin == 'auto':
 		Alim_bin = [ min(A), max(A) ]
+		if Alim_bin[0] == Alim_bin[1]:
+			print("Flag: Skipping histogram plot - all values are the same.")
+			return
 	elif not ars.isarray(Alim_bin) or len(Alim_bin) != 2:
 		print("Flag: Skipping histogram plot - variable limits must be either 'auto' or 2-element array.")
 		return
 	if isinstance(Blim_bin, str) and Blim_bin == 'auto':
 		Blim_bin = [ min(B), max(B) ]
+		if Blim_bin[0] == Blim_bin[1]:
+			print("Flag: Skipping histogram plot - all values are the same.")
+			return
 	elif not ars.isarray(Blim_bin) or len(Blim_bin) != 2:
 		print("Flag: Skipping histogram plot - variable limits must be either 'auto' or 2-element array.")
 		return
@@ -2180,7 +2362,7 @@ def plotHist2D(A, B, figLabel='auto', Alabel=None, Blabel=None, nbin='auto', Ali
 			return
 
 	### initialize figure
-	ars.initFig(figLabel, Alabel, Blabel, Alim_plot, Blim_plot, title, ax, "Hist2D")
+	ars.initFig(figLabel, Alabel, Blabel, Alim_plot, Blim_plot, title, ax, "Hist2D", False)
 
 	### plot histogram
 	plt.hist2d(A, B, nbin, range=[Alim_bin,Blim_bin], density=useDensity)
@@ -2202,6 +2384,9 @@ def plotPMF(A, figLabel='auto', Alabel=None, nbin='auto', Alim_bin='auto', Alim_
 		sys.exit()
 	if isinstance(Alim_bin, str) and Alim_bin == 'auto':
 		Alim_bin = [ min(A), max(A) ]
+		if Alim_bin[0] == Alim_bin[1]:
+			print("Flag: Skipping histogram plot - all values are the same.")
+			return
 	elif not ars.isarray(Alim_bin) or len(Alim_bin) != 2:
 		print("Error: Cannot calculate PMF - variable limits must be either 'auto' or 2-element array.\n")
 		sys.exit()
@@ -2230,7 +2415,7 @@ def plotPMF(A, figLabel='auto', Alabel=None, nbin='auto', Alim_bin='auto', Alim_
 		PMF -= np.nanmax(PMF)
 
 	### initialize figure
-	ars.initFig(figLabel, Alabel, "PMF [kT]", Alim_plot, None, title, ax, "PMF")
+	ars.initFig(figLabel, Alabel, "PMF [kT]", Alim_plot, None, title, ax, "PMF", False)
 
 	### plot PMF
 	plt.plot(bins, PMF, '-o', color=color)
@@ -2240,7 +2425,7 @@ def plotPMF(A, figLabel='auto', Alabel=None, nbin='auto', Alim_bin='auto', Alim_
 
 
 ### plot umbrella sampling histograms and PMF
-def plotUS(OPs_eq, weights, OPs_ts, OPs_wham, PMF, PMF_err, nbin='auto', OPlabel="Order Parameter", figLabelPrefix=None, titlePrefix=None, **kwargs):
+def plotUS(OPs_eq, weights, OPs_ts, OPs_wham, PMF, PMF_err, nbin='auto', OPlabel="Order Parameter", titlePrefix=None, figLabelPrefix=None, **kwargs):
 
 	### additional keyword args
 	useOxUnits			= False		if 'useOxUnits' not in kwargs else kwargs['useOxUnits']
@@ -2258,13 +2443,12 @@ def plotUS(OPs_eq, weights, OPs_ts, OPs_wham, PMF, PMF_err, nbin='auto', OPlabel
 
 	### adjust to oxDNA units (assuming nm and kcal)
 	if useOxUnits:
-		OPs_eq *= 1/0.8518
-		weights *= 1/8.2
-		OPs_ts = [i/0.8518 for i in OPs_ts]
-		OPs_wham *= 1/0.8518
+		OPs_eq *= nm2ox
+		weights *= kcal2ox
+		OPs_ts = [x*nm2ox for x in OPs_ts]
+		OPs_wham *= nm2ox
 
-	### preparations
-	nsim = len(OPs_eq)
+	### prepare labels
 	titleHist = "US Histograms"
 	titlePMF = "Free Energy"
 	if titlePrefix is not None:
@@ -2276,30 +2460,34 @@ def plotUS(OPs_eq, weights, OPs_ts, OPs_wham, PMF, PMF_err, nbin='auto', OPlabel
 		figLabelHist = f"{figLabelPrefix} {figLabelHist}"
 		figLabelPMF = f"{figLabelPrefix} {figLabelPMF}"
 
-	### plot nice histograms
-	plt.figure(figLabelHist)
-	for i in range(nsim):
+	### plot histograms
+	ars.initFig(figLabelHist, OPlabel, title=titleHist)
+	for i in range(len(OPs_eq)):
 		if autoBin == True:
 			nbin = ars.optbins(OPs_ts[i], 50)
 		label = f"$OP={OPs_eq[i]:0.{OP_precision}f}$, $w={weights[i]:0.{weight_precision}f}$"
-		ars.plotHist(OPs_ts[i], figLabel=figLabelHist, nbin=nbin, Alim_plot=None, alpha=0.4, useDensity=True, plotGauss=True, label=label)
-	plt.xlabel(OPlabel)
-	if insideLegend:
-		plt.legend(loc='best')
-	else:
+		ars.plotHist(OPs_ts[i], figLabelHist, nbin=nbin, Alim_plot=None, alpha=0.4, useDensity=True, plotGauss=True, label=label)
+	if not insideLegend:
 		plt.legend(loc='center left', bbox_to_anchor=(1,0.5))
-	plt.title(titleHist)
+	else:
+		plt.legend(loc='best')
 
 	### plot PMF
-	plt.figure(figLabelPMF)
-	plt.errorbar(OPs_wham, PMF, PMF_err, color='purple')
-	plt.xlabel(OPlabel)
-	plt.ylabel('PMF [kcal/mol]')
+	ars.initFig(figLabelPMF, OPlabel, 'PMF [kcal/mol]', title=titlePMF)
+	ars.plotLine(OPs_wham, PMF, figLabelPMF, E=PMF_err, color='purple')
 	plt.title(titlePMF)
 
 
+def plotCumProb(OPs_wham, PMF, T=300, figLabel="Cum Prob"):
+
+	kT = 0.001987*T
+	Z = np.sum(np.exp(-PMF/kT))
+	p = np.exp(-PMF/kT)/Z
+	cp = np.cumsum(p)
+	ars.plotLine(OPs_wham, cp, figLabel, color='black',linewidth=3)
+
+
 ### calculate and plot mean squared displacement
-# def plotMSD(points, dbox3, dt_per_frame, Xlabel=None, Ylabel=None, title=None, figLabel="MSD", nbin=10):
 def plotMSD(points, dbox3, dt_per_frame, nbin=10, figLabel="MSD", Xlabel=None, Ylabel=None, title=None):
 
 	### define center of mass function
@@ -2389,12 +2577,20 @@ def plotBondWrite(bondWriteFile):
 ### Calculations
 
 ### use wham to calculate PMF
-def calcPMF(OPs_eq, weights, OPs_ts, tsFold, nbin, bin_padding, whamMetaFile, whamOutFile, assumeIID=False):
+### tsFold used to be in a different spot, still need to change the old calls
+def calcPMF(OPs_eq, weights, OPs_ts, nbin, bin_padding=0, T=300, tsFold="timeseries/", whamMetaFile="wham_metadata.txt", whamOutFile="wham_output.txt", assumeIID=False):
 
 	### notes
 	# the weights need to be in kcal/mol*{op unit}^2.
 	# the output PMF are in kcal/mol.
-	# uses autocorrelation to calculate the correlation time (used for error bars).
+	# autocorrelation is used to calculate the correlation time (used for error bars).
+
+	### interpret input
+	if ars.isnumber(bin_padding):
+		bin_padding = [bin_padding,bin_padding]
+	elif not ars.isarray(bin_padding) or len(bin_padding) != 2:
+		print("Error: Bin padding must be number or 2-element array.")
+		sys.exit()
 
 	### prepare timeseries file names
 	ars.createEmptyFold(tsFold)
@@ -2403,7 +2599,7 @@ def calcPMF(OPs_eq, weights, OPs_ts, tsFold, nbin, bin_padding, whamMetaFile, wh
 	print("Writing timeseries...")
 	nsim = len(OPs_eq)
 	for i in range(nsim):
-		nstep = OPs_ts[i].shape[0]
+		nstep = len(OPs_ts[i])
 
 		### write sep timeseries file
 		tsFile = tsFold + f"ts_sim{i:02}.txt"
@@ -2423,21 +2619,78 @@ def calcPMF(OPs_eq, weights, OPs_ts, tsFold, nbin, bin_padding, whamMetaFile, wh
 			f.write(f"{tsFile} {OPs_eq[i]} {weights[i]} {tau_int:.2f}\n")
 
 	### wham parameters (not expected to change)
-	T_wham = 300
 	tol_wham = 0.001
 	ntrial_MC_wham = 10
 
 	### set wham bin limits
-	bin_min = round(min(OPs_eq)-bin_padding,8)
-	bin_max = round(max(OPs_eq)+bin_padding,8)
+	bin_min = round(min(OPs_eq)-bin_padding[0],8)
+	bin_max = round(max(OPs_eq)+bin_padding[1],8)
 
 	### run wham (from Grossfield)
 	print("Running wham...\n")
-	subprocess.call(["/Users/dduke/.local/bin/wham", str(bin_min), str(bin_max), str(nbin), str(tol_wham), str(T_wham), "0", whamMetaFile, whamOutFile, str(ntrial_MC_wham), "37"]); print()
+	subprocess.call(["/Users/dduke/.local/bin/wham", str(bin_min), str(bin_max), str(nbin), str(tol_wham), str(T), "0", whamMetaFile, whamOutFile, str(ntrial_MC_wham), "37"]); print()
 
 	### read wham output, return
 	OPs_wham, PMF, PMF_err = ars.readWham(whamOutFile, nbin)
 	return OPs_wham, PMF, PMF_err
+
+
+### use wham to calculate PMF
+def calcPMF2D(OP1s_eq, OP2s_eq, w1s, w2s, OP1s_ts, OP2s_ts, nbin, bin_padding=[0,0], T=300, tsFold="timeseries/", whamMetaFile="wham_metadata.txt", whamOutFile="wham_output.txt", assumeIID=False):
+
+	### notes
+	# the weights need to be in kcal/mol*{op unit}^2.
+	# the output PMF are in kcal/mol.
+	# autocorrelation is used to calculate the correlation time (used for error bars).
+
+	### interpret input
+	if ars.isnumber(bin_padding):
+		bin_padding = [bin_padding,bin_padding,bin_padding,bin_padding]
+	elif ars.isarray(bin_padding) and len(bin_padding) == 2:
+		bin_padding = [bin_padding[0],bin_padding[0],bin_padding[1],bin_padding[1]]
+	elif not ars.isarray(bin_padding) or len(bin_padding) != 4:
+		print("Error: Bin padding must be number, 2-element array, or 4-element array.")
+		sys.exit()
+
+	### prepare timeseries file names
+	ars.createEmptyFold(tsFold)
+
+	### loop over simulations
+	print("Writing timeseries...")
+	nsim = len(OP1s_eq)
+	for i in range(nsim):
+		nstep = len(OP1s_ts[i])
+
+		### write sep timeseries file
+		tsFile = tsFold + f"ts_sim{i:03}.txt"
+		with open(tsFile, 'w') as f:
+			for j in range(nstep):
+				f.write(f"{j} {OP1s_ts[i][j]} {OP2s_ts[i][j]}\n")
+
+	### write wham metadata file
+	print("Writing wham metadata...")
+	print(whamMetaFile)
+	with open(whamMetaFile, 'w') as f:
+		for i in range(nsim):
+			tsFile = tsFold + f"ts_sim{i:03}.txt"
+			f.write(f"{tsFile} {OP1s_eq[i]} {OP2s_eq[i]} {w1s[i]} {w2s[i]}\n")
+
+	### wham parameters (not expected to change)
+	tol_wham = 0.001
+
+	### set wham bin limits
+	bin_min_x = round(min(OP1s_eq)-bin_padding[0],8)
+	bin_max_x = round(max(OP1s_eq)+bin_padding[0],8)
+	bin_min_y = round(min(OP2s_eq)-bin_padding[1],8)
+	bin_max_y = round(max(OP2s_eq)+bin_padding[1],8)
+
+	### run wham (from Grossfield)
+	print("Running wham...\n")
+	subprocess.call(["/Users/dduke/.local/bin/wham-2d", "Px=0", str(bin_min_x), str(bin_max_x), str(nbin), "Py=0", str(bin_min_y), str(bin_max_y), str(nbin), str(tol_wham), str(T), "0", whamMetaFile, whamOutFile, "1"]); print()
+
+	### read wham output, return
+	OP1s_wham, OP2s_wham, PMF = ars.readWham2D(whamOutFile, nbin)
+	return OP1s_wham, OP2s_wham, PMF
 
 
 ### shift trajectory, placing the given point at the center, optionally unwrapping molecules at boundary
@@ -2484,7 +2737,7 @@ def centerPointsMolecule(points, molecules, dbox3s, center=1, unwrap=True, repor
 
 		### calculate molecule coms
 		for j in range(nmolecule):
-			if checkAnyDummy(points_moleculed[j][i]):
+			if ars.checkAnyDummy(points_moleculed[j][i]):
 				if not excludeDummy:
 					print("Warning: Potential dummy beads detected.")
 				elif not checkAllDummy(points_moleculed[j][i]):
@@ -2640,7 +2893,163 @@ def alignPCs(r, indices='all', axis_ranking=[0,1,2], getPCs=False):
 	return output
 
 
-### histogram that blurs the lines between
+### convert oxDNA quaternion to coordinate axes
+def quatToAxes(q):
+	a = np.zeros((3,3))
+
+	a[0,0] = q[0]*q[0] + q[1]*q[1] - q[2]*q[2] - q[3]*q[3]
+	a[0,1] = 2*(q[1]*q[2] + q[0]*q[3])
+	a[0,2] = 2*(q[1]*q[3] - q[0]*q[2])
+
+	a[1,0] = 2*(q[1]*q[2] - q[0]*q[3])
+	a[1,1] = q[0]*q[0] - q[1]*q[1] + q[2]*q[2] - q[3]*q[3]
+	a[1,2] = 2*(q[2]*q[3] + q[0]*q[1])
+
+	a[2,0] = 2*(q[1]*q[3] + q[0]*q[2])
+	a[2,1] = 2*(q[2]*q[3] - q[0]*q[1])
+	a[2,2] = q[0]*q[0] - q[1]*q[1] - q[2]*q[2] + q[3]*q[3]
+
+	### result
+	return a
+
+
+### convert coordinate axes to oxDNA quaternion
+def axesToQuat(a):
+	q = np.zeros(4)
+
+	trace = a[0,0] + a[1,1] + a[2,2]
+	if trace > 0.0:
+		s = 0.5 / np.sqrt(trace + 1.0)
+		q[0] = 0.25 / s
+		q[1] = (a[1,2] - a[2,1]) * s
+		q[2] = (a[2,0] - a[0,2]) * s
+		q[3] = (a[0,1] - a[1,0]) * s
+
+	elif a[0,0] > a[1,1] and a[0,0] > a[2,2]:
+		s = 2.0 * np.sqrt(1.0 + a[0,0] - a[1,1] - a[2,2])
+		q[0] = (a[1,2] - a[2,1]) / s
+		q[1] = 0.25 * s
+		q[2] = (a[1,0] + a[0,1]) / s
+		q[3] = (a[2,0] + a[0,2]) / s
+
+	elif a[1,1] > a[2,2]:
+		s = 2.0 * np.sqrt(1.0 + a[1,1] - a[0,0] - a[2,2])
+		q[0] = (a[2,0] - a[0,2]) / s
+		q[1] = (a[1,0] + a[0,1]) / s
+		q[2] = 0.25 * s
+		q[3] = (a[2,1] + a[1,2]) / s
+
+	else:
+		s = 2.0 * np.sqrt(1.0 + a[2,2] - a[0,0] - a[1,1])
+		q[0] = (a[0,1] - a[1,0]) / s
+		q[1] = (a[2,0] + a[0,2]) / s
+		q[2] = (a[2,1] + a[1,2]) / s
+		q[3] = 0.25 * s
+
+	### result
+	return q
+
+
+### calculate hydrogen bond energy between two nucleotides
+def calcHbondEnergy(r1, axes1, r2, axes2, dbox):
+
+	### notes
+	# assumes positions are in oxDNA units
+
+	### f1 parameters
+	HYDR_EPS = 1.077
+	HYDR_A = 8.0
+	HYDR_R0 = 0.4
+	HYDR_RC = 0.75
+	HYDR_BLOW = -126.243
+	HYDR_RLOW = 0.34
+	HYDR_RCLOW = 0.276908
+	HYDR_BHIGH = -7.87708
+	HYDR_RHIGH = 0.7
+	HYDR_RCHIGH = 0.783775
+
+	### f4 parameters
+	HYDR_F4_PARAMS = {
+		"theta1": dict(a=1.5, b=4.16038, t0=0.0, ts=0.7, tc=0.952381),
+		"theta2": dict(a=1.5, b=4.16038, t0=0.0, ts=0.7, tc=0.952381),
+		"theta3": dict(a=1.5, b=4.16038, t0=0.0, ts=0.7, tc=0.952381),
+		"theta4": dict(a=0.46, b=0.133855, t0=np.pi, ts=0.7, tc=3.10559),
+		"theta7": dict(a=4.0, b=17.0526, t0=np.pi/2, ts=0.45, tc=0.555556),
+		"theta8": dict(a=4.0, b=17.0526, t0=np.pi/2, ts=0.45, tc=0.555556),
+	}
+
+	### radial part of the potential
+	def f1(r, eps=HYDR_EPS, a=HYDR_A, r0=HYDR_R0,
+			  blow=HYDR_BLOW, rlow=HYDR_RLOW, rclow=HYDR_RCLOW,
+			  bhigh=HYDR_BHIGH, rhigh=HYDR_RHIGH, rchigh=HYDR_RCHIGH):
+
+		if r <= rclow or r > rchigh:
+			return 0.0
+
+		def tmp(rr):
+			return 1.0 - np.exp(-(rr - r0) * a)
+
+		shift = eps * tmp(rhigh) ** 2 - eps * bhigh * (rhigh - rchigh) ** 2
+
+		if rhigh < r <= rchigh:
+			return eps * bhigh * (r - rchigh) ** 2
+		elif rlow < r <= rhigh:
+			return eps * tmp(r) ** 2 - shift
+		else:
+			return eps * blow * (r - rclow) ** 2
+
+	### angular part of the potential
+	def f4(cos_theta, theta_key):
+		p = HYDR_F4_PARAMS[theta_key]
+		a, b, t0, ts, tc = p["a"], p["b"], p["t0"], p["ts"], p["tc"]
+
+		cos_theta = np.clip(cos_theta, -1.0, 1.0)
+		theta = np.arccos(cos_theta)
+		dtheta = theta - t0
+
+		if abs(dtheta) > tc:
+			return 0.0
+		elif abs(dtheta) <= ts:
+			return 1.0 - a * dtheta ** 2
+		else:
+			return b * (tc - abs(dtheta)) ** 2
+		return f4_sub(cos_theta, p["a"], p["b"], p["t0"], p["ts"], p["tc"])
+
+	### hydrogen bonding site
+	base1 = r1 + 0.4*axes1[0]
+	base2 = r2 + 0.4*axes2[0]
+
+	### base pairing vector
+	r12 = ars.applyPBC(base2 - base1, dbox)
+	r12_mag = np.linalg.norm(r12)
+	r12_unit = r12 / r12_mag
+
+	### check limits
+	if not (HYDR_RCLOW < r12_mag < HYDR_RCHIGH):
+		return 0.0
+
+	### trig calculations
+	cost1 = -np.dot(axes1[0], axes2[0])
+	cost2 = -np.dot(axes2[0], r12_unit)
+	cost3 = np.dot(axes1[0], r12_unit)
+	cost4 = np.dot(axes1[2], axes2[2])
+	cost7 = -np.dot(axes2[2], r12_unit)
+	cost8 = np.dot(axes1[2], r12_unit)
+
+	### functions
+	f1 = f1(r12_mag)
+	f4t1 = f4(cost1, "theta1")
+	f4t2 = f4(cost2, "theta2")
+	f4t3 = f4(cost3, "theta3")
+	f4t4 = f4(cost4, "theta4")
+	f4t7 = f4(cost7, "theta7")
+	f4t8 = f4(cost8, "theta8")
+
+	### result
+	return f1 * f4t1 * f4t2 * f4t3 * f4t4 * f4t7 * f4t8
+
+
+### histogram that supports partial splitting data points between bins when near the border
 def fractionalHist(data, bin_edges, alpha=1, limit_left='taper', limit_right='taper'):
 
 	### notes
@@ -2744,7 +3153,7 @@ def calcSEMautocorr(A, hush=False):
 ### calculate correlation time
 def calcCorrTime(A, hush=False):
 	A = np.asarray(A, dtype=float)
-	if any(np.isnan(A)):
+	if any(np.isnan(A)) or min(A) == max(A):
 		acf = ars.calcAutocorrSafe(A)
 	else:
 		acf = ars.calcAutocorr(A)
@@ -2752,7 +3161,7 @@ def calcCorrTime(A, hush=False):
 	### Sokal window method
 	M = 5
 	tau = None
-	tau_cumsum = np.cumsum(acf[1:])	
+	tau_cumsum = np.cumsum(acf[1:])
 	for i, tau_est in enumerate(tau_cumsum):
 		if i + 1 >= M * tau_est:
 			tau = tau_est
@@ -2928,6 +3337,14 @@ def calcNormStats(A, weights=None):
 		return mu, sigma
 
 
+### calculate factorial
+def factorial(n):
+	if not ars.isinteger(n):
+		print("Error: Cannot calculate factorial of float.")
+		sys.exit()
+	return np.prod(np.arange(1,n+1))
+
+
 ################################################################################
 ### Random
 
@@ -2997,7 +3414,7 @@ def updateStatusBar(i, n, length=30, units='steps'):
 	### dynamic output
 	if sys.stdout.isatty():
 		if i < n-1:
-		 	print(f"\r-- {i+1}/{n} {units}", end='', flush=True)
+			print(f"\r-- {i+1}/{n} {units}", end='', flush=True)
 		else:
 			print(f"\r-- {n}/{n} {units}")
 
@@ -3064,7 +3481,7 @@ def trimDims(A, ndim_trim=0):
 
 
 ### determine if file exists
-def checkFileExist(file, name="the", required=True, requireData=False):
+def checkFileExist(file, name="the", required=True, requireData=False, hush=False):
 	if os.path.isfile(file):
 		if not requireData or os.path.getsize(file):
 			return True
@@ -3078,7 +3495,8 @@ def checkFileExist(file, name="the", required=True, requireData=False):
 			print(file + "\n")
 			sys.exit()
 		else:
-			print(f"Flag: Could not find {name} file.")
+			if not hush:
+				print(f"Flag: Could not find {name} file.")
 			return False
 
 
@@ -3108,7 +3526,7 @@ def compressArr(A):
 		return str(A[0])
 	elif len(A) == 2:
 		return f"[{A[0]} {A[1]}]"
-	elif max(A) == min(A):
+	elif min(A) == max(A):
 		return f"[{A[0]} ... {A[0]}]"
 	elif all(A[i]+1 == A[i+1] for i in range(len(A)-1)):
 		return f"[{A[0]} ... {A[-1]}]"
@@ -3135,9 +3553,9 @@ def isnumber(x):
 
 ### test if variable is an integer (both python int and numpy int count)
 def isinteger(x):
-    if isinstance(x, int) or isinstance(x, np.int64):
-        return True
-    return False
+	if isinstance(x, int) or isinstance(x, np.int64):
+		return True
+	return False
 
 
 ### check if variable is an array (both list and numpy array count)

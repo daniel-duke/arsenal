@@ -25,14 +25,14 @@ def main():
 	parser.add_argument('unwrap',type=int,nargs='?',default=0)
 	parser.add_argument('setColor',type=int,nargs='?',default=0)
 	parser.add_argument('report',type=int,nargs='?',default=0)
-	parser.add_argument('--mol-column',type=int,default=2)
-	parser.add_argument('--color-column',type=int,default=2)
+	parser.add_argument('--mol-col',type=int,default=2)
+	parser.add_argument('--color-col',type=int,default=2)
 	parser.add_argument('--excludeDummy',action='store_true')
 	args = parser.parse_args()
 
 	### convert to 0-based column indices
-	col_mol = args.mol_column-1
-	col_color = args.color_column-1
+	col_mol = args.mol_col-1
+	col_color = args.color_col-1
 
 	### read file (no skipped steps, no coarsening)
 	points, molecules, colors, dbox3s, steps_per_frame = readAtomDump(args.datFile, col_mol, col_color, args.report)

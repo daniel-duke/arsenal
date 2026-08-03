@@ -20,26 +20,24 @@ import os
 
 def main():
 
-	### command line input
-	datFile = sys.argv[1]
-	coarse_time = int(sys.argv[2])
-
 	### get arguments
 	parser = argparse.ArgumentParser()
 	parser.add_argument('datFile',type=str)
 	parser.add_argument('coarse_time',type=int)
 	parser.add_argument('report',type=int,nargs='?',default=0)
+	parser.add_argument('--precision',type=int,default=8)
+	parser.add_argument('--keepVelocity',action='store_true')
 	args = parser.parse_args()
 
 	### read old, write new
-	readWriteOxDNA(args.datFile, args.coarse_time, args.report)
+	readWriteOxDNA(args.datFile, args.coarse_time, args.report, args.precision, args.keepVelocity)
 
 
 ################################################################################
 ### File Managers
 
 ### read oxdna trajectory, write coarsened one
-def readWriteOxDNA(datFile, coarse_time, report):
+def readWriteOxDNA(datFile, coarse_time, report, precision, keepVelocity):
 	outDatFile = addSuffix(datFile, "_coarse")
 
 	### extract metadata
@@ -73,27 +71,50 @@ def readWriteOxDNA(datFile, coarse_time, report):
 		print("{:1.2e} steps in simulation".format((nstep_recorded-1)*steps_per_frame))
 		print("{:1.2e} steps in trajectory".format(nstep_recorded))
 		print("{:1.2e} steps after coarsening".format(nstep_coarse))
+		i = 0
 
 	### write new file
 	if report: initStatusBar("Coarsening trajectory")
-	with open(outDatFile, 'w') as fout:
-		with open(datFile) as fin:
-			copy = True
-			i = 0
+	with open(datFile, 'r') as fin:
+		with open(outDatFile, 'w', buffering=1024*1024) as fout:
 			while True:
-				line = fin.readline()
-				if not line:
+
+				### check for new frame
+				t_line = fin.readline()
+				if not t_line:
 					break
-				if len(line.split()) > 1 and line.split()[0] == 't':
-					step = int(line.split()[2])
-					if step/steps_per_frame % coarse_time == 0:
-						copy = True
-						if report: updateStatusBar(i,nstep_coarse)
-						i += 1
-					else:
-						copy = False
-				if copy == True:
-					fout.write(line)
+
+				### read rest of frame
+				b_line = fin.readline()
+				e_line = fin.readline()
+				data_lines = [fin.readline() for _ in range(nba_total)]
+
+				### skip unused frames
+				step = int(t_line.split()[2])
+				if (step // steps_per_frame) % coarse_time != 0:
+					continue
+
+				### keep in touch
+				if report:
+					updateStatusBar(i, nstep_coarse)
+					i += 1
+
+				### copy header
+				fout.write(t_line)
+				fout.write(b_line)
+				fout.write(e_line)
+
+				### write data
+				chunks = []
+				for line in data_lines:
+					parts = line.split() if keepVelocity else line.split(None, 9)[:9]
+					out_tokens = []
+					for tok in parts:
+						dot = tok.find('.')
+						end = dot + 1 + precision
+						out_tokens.append(tok if dot == -1 or end >= len(tok) else tok[:end])
+					chunks.append(' '.join(out_tokens) + '\n')
+				fout.write(''.join(chunks))
 
 
 ################################################################################

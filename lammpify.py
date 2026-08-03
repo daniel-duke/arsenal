@@ -59,7 +59,7 @@ def main():
 	### adjustments for split lammps simulation
 	if geoFile is not None and split: 
 		style = 'ox'
-		units = 'ang'
+		units = 'ox'
 
 
 ################################################################################
@@ -77,22 +77,17 @@ def main():
 	if geoFile is not None:
 
 		### read geometry
-		if style == 'mol':
-			points_init, molecules, types, bonds, _, dbox3 = ars.readGeo(geoFile, getDbox3=True, style=style)
-		elif style == 'full':
-			points_init, molecules, types, _, bonds, _, dbox3 = ars.readGeo(geoFile, getDbox3=True, style=style)
-		elif style == 'ox':
-			points_init, molecules, types, radii, quats_init, bonds, _, dbox3 = ars.readGeo(geoFile, getDbox3=True, style=style)
+		if style == 'ox':
+			points_init, dbox3, molecules, types, radii, quats_init, bonds = ars.readGeo(geoFile, style=style, getDbox3=True, getBonds=True)
 		else:
-			print("Error: Unrecognized atom style.")
-			sys.exit()
+			points_init, dbox3, molecules, types, bonds = ars.readGeo(geoFile, style=style, getDbox3=True, getBonds=True)
 
 		### read trajectory
 		if datFile is not None:
 			if not split:
-				points, _, dbox3s = ars.readAtomDump(datFile, nstep_skip, coarse_time, getDbox3s=True)
+				points, dbox3s = ars.readAtomDump(datFile, nstep_skip, coarse_time, getDbox3s=True)
 			else:
-				points, _, dbox3s, quats = ars.readAtomDump(datFile, nstep_skip, coarse_time, getDbox3s=True, getQuats=True)
+				points, dbox3s, quats = ars.readAtomDump(datFile, nstep_skip, coarse_time, getDbox3s=True, getQuats=True)
 
 		### unit conversion
 		scale = convertToNm(units)
@@ -221,7 +216,7 @@ def convertToNm(units):
 	if units == 'nm':
 		scale = 1
 	elif units == 'ox':
-		scale = 0.8518
+		scale = ox2nm
 	elif units == 'ang':
 		scale = 0.1
 	else:
@@ -249,14 +244,14 @@ def splitNucleotides(points, axes, molecules, colors, bonds):
 	quats[:,:,0] = 1
 
 	### split position data
-	points_split[:,:npoint] = points + 0.8518*(-0.34*axes[:,:,0] + 0.3408*axes[:,:,1])
-	points_split[:,npoint:] = points + 0.8518*(0.4*axes[:,:,0])
+	points_split[:,:npoint] = points + ars.ox2nm*(-0.34*axes[:,:,0] + 0.3408*axes[:,:,1])
+	points_split[:,npoint:] = points + ars.ox2nm*(0.4*axes[:,:,0])
 
 	### calculate orientation data
 	ars.initStatusBar("Calculating quaternions")
 	for i in range(nstep):
 		for j in range(npoint):
-			quats[i,npoint+j] = axesToQuat(axes[i,j])
+			quats[i,npoint+j] = ars.axesToQuat(axes[i,j])
 		ars.updateStatusBar(i,nstep)
 
 	### add base to backbone bonds
@@ -279,43 +274,6 @@ def splitNucleotides(points, axes, molecules, colors, bonds):
 	return points_split, quats, molecules, colors, radii, bonds
 
 
-### convert coordinate axes to quaternion
-def axesToQuat(a):
-	q = np.zeros(4)
-
-	trace = a[0,0] + a[1,1] + a[2,2]
-	if trace > 0.0:
-		s = 0.5 / np.sqrt(trace + 1.0)
-		q[0] = 0.25 / s
-		q[1] = (a[1,2] - a[2,1]) * s
-		q[2] = (a[2,0] - a[0,2]) * s
-		q[3] = (a[0,1] - a[1,0]) * s
-
-	elif a[0,0] > a[1,1] and a[0,0] > a[2,2]:
-		s = 2.0 * np.sqrt(1.0 + a[0,0] - a[1,1] - a[2,2])
-		q[0] = (a[1,2] - a[2,1]) / s
-		q[1] = 0.25 * s
-		q[2] = (a[1,0] + a[0,1]) / s
-		q[3] = (a[2,0] + a[0,2]) / s
-
-	elif a[1,1] > a[2,2]:
-		s = 2.0 * np.sqrt(1.0 + a[1,1] - a[0,0] - a[2,2])
-		q[0] = (a[2,0] - a[0,2]) / s
-		q[1] = (a[1,0] + a[0,1]) / s
-		q[2] = 0.25 * s
-		q[3] = (a[2,1] + a[1,2]) / s
-
-	else:
-		s = 2.0 * np.sqrt(1.0 + a[2,2] - a[0,0] - a[1,1])
-		q[0] = (a[0,1] - a[1,0]) / s
-		q[1] = (a[2,0] + a[0,2]) / s
-		q[2] = (a[2,1] + a[1,2]) / s
-		q[3] = 0.25 * s
-
-	### result
-	return q
-
-
 ### wrapper function for converting quaternion trajectory to coordinate axes trajectory
 def quatsToAxes(quats):
 
@@ -331,7 +289,7 @@ def quatsToAxes(quats):
 	ars.initStatusBar("Calculating axes")
 	for i in range(nstep):
 		for j in range(npoint):
-			axes[i,j] = quatToAxes(quats[i,j])
+			axes[i,j] = ars.quatToAxes(quats[i,j])
 		ars.updateStatusBar(i,nstep)
 
 	### add time dimension to single frames
@@ -339,26 +297,6 @@ def quatsToAxes(quats):
 
 	### result
 	return axes
-
-
-### convert quaternion to coordinate axes
-def quatToAxes(q):
-	a = np.zeros((3,3))
-
-	a[0,0] = q[0]*q[0] + q[1]*q[1] - q[2]*q[2] - q[3]*q[3]
-	a[0,1] = 2*(q[1]*q[2] + q[0]*q[3])
-	a[0,2] = 2*(q[1]*q[3] - q[0]*q[2])
-
-	a[1,0] = 2*(q[1]*q[2] - q[0]*q[3])
-	a[1,1] = q[0]*q[0] - q[1]*q[1] + q[2]*q[2] - q[3]*q[3]
-	a[1,2] = 2*(q[2]*q[3] + q[0]*q[1])
-
-	a[2,0] = 2*(q[1]*q[3] + q[0]*q[2])
-	a[2,1] = 2*(q[2]*q[3] - q[0]*q[1])
-	a[2,2] = q[0]*q[0] - q[1]*q[1] - q[2]*q[2] + q[3]*q[3]
-
-	### result
-	return a
 
 
 ### identify molecules (1 for unidentified, 2+ for molecule IDs)
