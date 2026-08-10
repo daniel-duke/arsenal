@@ -111,8 +111,15 @@ def readWriteOxDNA(datFile, coarse_time, report, precision, keepVelocity):
 					out_tokens = []
 					for tok in parts:
 						dot = tok.find('.')
+						if dot == -1:
+							out_tokens.append(tok)
+							continue
 						end = dot + 1 + precision
-						out_tokens.append(tok if dot == -1 or end >= len(tok) else tok[:end])
+						e_idx = tok.find('e', dot)
+						if e_idx == -1:
+							out_tokens.append(tok if end >= len(tok) else tok[:end])
+						else:
+							out_tokens.append(tok if end >= e_idx else tok[:end] + tok[e_idx:])
 					chunks.append(' '.join(out_tokens) + '\n')
 				fout.write(''.join(chunks))
 
@@ -168,7 +175,7 @@ def updateStatusBar(i, n, length=30, units='steps'):
 	### dynamic output
 	if sys.stdout.isatty():
 		if i < n-1:
-		 	print(f"\r-- {i+1}/{n} {units}", end='', flush=True)
+			print(f"\r-- {i+1}/{n} {units}", end='', flush=True)
 		else:
 			print(f"\r-- {n}/{n} {units}")
 

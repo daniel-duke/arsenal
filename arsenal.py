@@ -1296,6 +1296,33 @@ def writeGeo(geoFile, dbox3, r, molecules='auto', types='auto', bonds=None, angl
 				f.write("\n")
 
 
+### write oxDNA configuration file
+def writeOxDNA(datFile, points, axes, dbox):
+
+	### add time dimension if necessary
+	points = ars.padDims(points,3)[0]
+
+	### get counts
+	nstep = points.shape[0]
+	nbead = points.shape[1]
+
+	### write file
+	with open(datFile, 'w') as f:
+		for i in range(nstep):
+
+			### header
+			f.write(f"t = {i}\n")
+			f.write(f"b = {dbox} {dbox} {dbox}\n")
+			f.write("E = 0 0 0\n")
+
+			### potisions
+			for j in range(nbead):
+				x, y, z = points[i,j]
+				a1x, a1y, a1z = axes[i,j,0]
+				a2x, a2y, a2z = axes[i,j,2]
+				f.write(f"{x} {y} {z} {a1x} {a1y} {a1z} {a2x} {a2y} {a2z}\n")
+
+
 ### load array of variables into pickle file
 def makePickle(pklFile, cucumber):
 	with open(pklFile, 'wb') as f:
@@ -2478,15 +2505,6 @@ def plotUS(OPs_eq, weights, OPs_ts, OPs_wham, PMF, PMF_err, nbin='auto', OPlabel
 	plt.title(titlePMF)
 
 
-def plotCumProb(OPs_wham, PMF, T=300, figLabel="Cum Prob"):
-
-	kT = 0.001987*T
-	Z = np.sum(np.exp(-PMF/kT))
-	p = np.exp(-PMF/kT)/Z
-	cp = np.cumsum(p)
-	ars.plotLine(OPs_wham, cp, figLabel, color='black',linewidth=3)
-
-
 ### calculate and plot mean squared displacement
 def plotMSD(points, dbox3, dt_per_frame, nbin=10, figLabel="MSD", Xlabel=None, Ylabel=None, title=None):
 
@@ -2836,6 +2854,15 @@ def calcCOM(r, dbox3, excludeDummy=False):
 	r_ref = dbox3*(theta_bar/(2*np.pi)-1/2)
 	com = r_ref + np.mean( ars.applyPBC(r-r_ref, dbox3), axis=0 )
 	return com
+
+
+### calculate cumulative probability, given free energy
+def calcCumProb(OPs, PMF, T=300):
+	kT = ars.kB_kcal*T
+	Z = np.sum(np.exp(-PMF/kT))
+	p = np.exp(-PMF/kT)/Z
+	cp = np.cumsum(p)
+	return cp
 
 
 ### place each point in the same image as its preceeding neighbor
