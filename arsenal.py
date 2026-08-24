@@ -274,6 +274,56 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 	return output
 
 
+### read oxdna trajectory
+def getNstepOx(datFile, nstep_skip=0, coarse_time=1, hush=False):
+
+	### count number of lines
+	ars.checkFileExist(datFile, "trajectory")
+	with open(datFile, 'rb') as f:
+		nline = sum(1 for _ in f)
+
+	### extract metadata
+	with open(datFile, 'r') as f:
+
+		### read header
+		header = []
+		for i in range(3):
+			header.append(f.readline())
+
+		### check if first line looks like an oxDNA trajectory
+		if header[0][:4] != "t = ":
+			print("Error: First line of trajectory file doesn't match expected (oxDNA) format.")
+			sys.exit()
+
+		### parse first header
+		step_init = int(header[0].split()[2])
+		dbox3 = np.array(header[1].split()[2:5],dtype=float)
+
+		### look for next frame
+		steps_per_frame = 0
+		for nba_total,line in enumerate(f,start=1):
+			if line[0] == 't':
+				steps_per_frame = int(line.split()[2]) - step_init
+				nba_total -= 1
+				break
+
+	### count steps
+	nstep_recorded = nline // (nba_total+3)
+	nstep_trimmed = (nstep_recorded-nstep_skip) // coarse_time
+	if nstep_trimmed <= 0:
+		print("Error: Cannot read oxDNA trajectory - too much initial time cut off.\n")
+		sys.exit()
+
+	### report step counts
+	if not hush:
+		print("{:1.2e} steps in simulation".format(nstep_recorded*steps_per_frame))
+		print("{:1.2e} steps in trajectory".format(nstep_recorded))
+		print("{:1.2e} steps for analysis".format(nstep_trimmed))
+
+	### result
+	return nstep_trimmed
+
+
 ### read lammps-style trajectory
 def readAtomDump(datFile, nstep_skip=0, coarse_time=1, bdis='all', coarse_points=1, nstep_max='all', **kwargs):
 	
