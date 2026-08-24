@@ -68,7 +68,7 @@ def readWriteOxDNA(datFile, coarse_time, report, precision, keepVelocity):
 
 	### report step counts
 	if report: 
-		print("{:1.2e} steps in simulation".format((nstep_recorded-1)*steps_per_frame))
+		print("{:1.2e} steps in simulation".format(nstep_recorded*steps_per_frame))
 		print("{:1.2e} steps in trajectory".format(nstep_recorded))
 		print("{:1.2e} steps after coarsening".format(nstep_coarse))
 		i = 0

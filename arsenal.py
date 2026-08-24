@@ -38,12 +38,23 @@ import ast
 ################################################################################
 ### Constants
 
-NA = 6.022e23
-kB_kcal = 0.001987
-ox2nm = 0.8518
-nm2ox = 1/0.8518
-ox2kcal = 8.22
-kcal2ox = 1/8.22
+NA = 6.022e23			# Avogadro's number
+kB_kcal = 0.001987		# Boltzmann constant in kcal/mol
+ox2nm = 0.8518			# oxDNA length to nm
+nm2ox = 1/0.8518		# nm to oxDNA length
+ox2kcal = 8.22			# oxDNA energy to kcal/mol
+kcal2ox = 1/8.22		# kcal/mol to oxDNA energy
+
+
+################################################################################
+### Defaults
+
+pdx = 0					# figure padding (x)
+pdy = 0					# figure padding (y)
+shx = 0					# box shift (x)
+shy = 0					# box shift (y)
+scx = 1					# box scale (x)
+scy = 1					# box scale (y)
 
 
 ################################################################################
@@ -974,6 +985,61 @@ def cleanFileContent(content):
 	return cleaned
 
 
+### load array of variables from pickle file
+def unpickle(pklFile, dims=None, hushExtraFlag=False):
+
+	### read file
+	ars.checkFileExist(pklFile, "pickle")
+	with open(pklFile, 'rb') as f:
+		cucumber = pickle.load(f)
+
+	### check and trim content
+	if dims is not None:
+		nvar = len(dims)
+
+		### make into array if single value
+		if not ars.isarray(cucumber):
+			cucumber = [ cucumber ]
+
+		### make sure pickle array is long enough
+		if len(cucumber) < len(dims):
+			print("Error: pickle array contained fewer elements than expected.\n")
+			sys.exit()
+
+		### trim pickle array if too long
+		elif len(cucumber) > len(dims):
+			if not hushExtraFlag:
+				print("Flag: pickle array contained more elements than expected, ignoring some elements.")
+			cucumber = cucumber[:len(dims)]
+
+		### check variables
+		for i in range(nvar):
+
+			### unknown dimension
+			if dims[i] == None:
+				continue
+
+			### single value expected
+			elif dims[i] == 0:
+				if not ars.isnumber(cucumber[i]):
+					print(f"Error: element {i} of the pickle array does not match the expected data type (number).\n")
+					sys.exit()
+
+			### if not single value, must be array
+			elif not ars.isarray(cucumber[i]):
+				print(f"Error: element {i} of the pickle array does not match the expected data type (array).\n")
+				sys.exit()
+
+			### if numpy array, must have correct shape
+			elif isinstance(cucumber[i], np.ndarray):
+				if len(cucumber[i].shape) != dims[i]:
+					print(f"Error: element {i} of the pickle array does not have the expected shape ({dims[i]}).\n")
+					sys.exit()
+
+	### result
+	return cucumber
+
+
 ### search given file for references to arsenal functions and constants
 def findArsReferences(searchFile=sys.argv[0], hush=False):
 
@@ -1301,6 +1367,7 @@ def writeOxDNA(datFile, points, axes, dbox):
 
 	### add time dimension if necessary
 	points = ars.padDims(points,3)[0]
+	axes = ars.padDims(axes,4)[0]
 
 	### get counts
 	nstep = points.shape[0]
@@ -1319,69 +1386,25 @@ def writeOxDNA(datFile, points, axes, dbox):
 			for j in range(nbead):
 				x, y, z = points[i,j]
 				a1x, a1y, a1z = axes[i,j,0]
-				a2x, a2y, a2z = axes[i,j,2]
-				f.write(f"{x} {y} {z} {a1x} {a1y} {a1z} {a2x} {a2y} {a2z}\n")
+				a3x, a3y, a3z = axes[i,j,2]
+				f.write(f"{x} {y} {z} {a1x} {a1y} {a1z} {a3x} {a3y} {a3z}\n")
+
+
+### write cluster file
+def writeCluster(clusterFile, clusters):
+	ncluster = len(clusters)
+	with open(clusterFile,'w') as f:
+		for i in range(ncluster):
+			f.write(f"CLUSTER {i+1}\n")
+			for j in range(len(clusters[i])):
+				f.write(f"{clusters[i][j]} ")
+			f.write("\n")
 
 
 ### load array of variables into pickle file
 def makePickle(pklFile, cucumber):
 	with open(pklFile, 'wb') as f:
 		pickle.dump(cucumber, f)
-
-
-### load array of variables from pickle file
-def unpickle(pklFile, dims=None, hushExtraFlag=False):
-
-	### read file
-	ars.checkFileExist(pklFile, "pickle")
-	with open(pklFile, 'rb') as f:
-		cucumber = pickle.load(f)
-
-	### check and trim content
-	if dims is not None:
-		nvar = len(dims)
-
-		### make into array if single value
-		if not ars.isarray(cucumber):
-			cucumber = [ cucumber ]
-
-		### make sure pickle array is long enough
-		if len(cucumber) < len(dims):
-			print("Error: pickle array contained fewer elements than expected.\n")
-			sys.exit()
-
-		### trim pickle array if too long
-		elif len(cucumber) > len(dims):
-			if not hushExtraFlag:
-				print("Flag: pickle array contained more elements than expected, ignoring some elements.")
-			cucumber = cucumber[:len(dims)]
-
-		### check variables
-		for i in range(nvar):
-
-			### unknown dimension
-			if dims[i] == None:
-				continue
-
-			### single value expected
-			elif dims[i] == 0:
-				if not ars.isnumber(cucumber[i]):
-					print(f"Error: element {i} of the pickle array does not match the expected data type (number).\n")
-					sys.exit()
-
-			### if not single value, must be array
-			elif not ars.isarray(cucumber[i]):
-				print(f"Error: element {i} of the pickle array does not match the expected data type (array).\n")
-				sys.exit()
-
-			### if numpy array, must have correct shape
-			elif isinstance(cucumber[i], np.ndarray):
-				if len(cucumber[i].shape) != dims[i]:
-					print(f"Error: element {i} of the pickle array does not have the expected shape ({dims[i]}).\n")
-					sys.exit()
-
-	### result
-	return cucumber
 
 
 ### create arsenal file that contains only the functions/constants necessary for the scripts in a given folder
@@ -1528,10 +1551,15 @@ def deployArsenal(srcFold=None):
 ### set pretty matplotlib defaults
 def magicPlot(pubReady=False, useTex=False, **kwargs):
 
+	### adjust defaults
+	if pubReady:
+		ars.shy = 0.1
+		ars.pdy = 0.2
+
 	### additional keyword args
 	font		= None		if 'font' not in kwargs else kwargs['font']
-	pad_x		= 0			if 'pad_x' not in kwargs else kwargs['pad_x']
-	pad_y		= 0			if 'pad_y' not in kwargs else kwargs['pad_y']
+	pad_x		= ars.pdx	if 'pad_x' not in kwargs else kwargs['pad_x']
+	pad_y		= ars.pdy	if 'pad_y' not in kwargs else kwargs['pad_y']
 	
 	### determine font size
 	if not pubReady:
@@ -1574,17 +1602,23 @@ def show():
 	plt.show()
 
 
+### wrapper for showing legends
+def legend():
+	plt.legend()
+
+
 ### set up figure
-def initFig(figLabel='auto', Xlabel=None, Ylabel=None, Xlim=None, Ylim=None, title=None, ax=None, figLabelAuto="Figure", setBox=True, **kwargs):
+def initFig(figLabel='auto', Xlabel=None, Ylabel=None, Xlim=None, Ylim=None, title=None, ax=None, figLabelAuto="Figure", **kwargs):
 
 	### additional keyword args
 	getAx			= False		if 'getAx' not in kwargs else kwargs['getAx']
 	projection		= None		if 'projection' not in kwargs else kwargs['projection']
 	Zlabel			= None		if 'Zlabel' not in kwargs else kwargs['Zlabel']
-	shift_x			= 0			if 'shift_x' not in kwargs else kwargs['shift_x']
-	shift_y			= 0			if 'shift_y' not in kwargs else kwargs['shift_y']
-	scale_x			= 1			if 'scale_x' not in kwargs else kwargs['scale_x']
-	scale_y			= 1			if 'scale_y' not in kwargs else kwargs['scale_y']
+	shift_x			= ars.shx	if 'shift_x' not in kwargs else kwargs['shift_x']
+	shift_y			= ars.shy	if 'shift_y' not in kwargs else kwargs['shift_y']
+	scale_x			= ars.scx	if 'scale_x' not in kwargs else kwargs['scale_x']
+	scale_y			= ars.scy	if 'scale_y' not in kwargs else kwargs['scale_y']
+	boxAsIs			= False		if 'boxAsIs' not in kwargs else kwargs['boxAsIs']
 
 	### initialize figure
 	if ax is not None:
@@ -1603,12 +1637,13 @@ def initFig(figLabel='auto', Xlabel=None, Ylabel=None, Xlim=None, Ylim=None, tit
 			ax = fig.add_subplot(projection=projection)
 
 	### position axis
-	size = fig.get_size_inches()
-	x0 = 1/size[0]*( shift_x + 0.125*8 )
-	dx = 1/size[0]*( scale_x*0.775*8 )
-	y0 = 1/size[1]*( shift_y + 0.1*6 )
-	dy = 1/size[1]*( scale_y*0.8*6 )
-	ax.set_position([x0, y0, dx, dy])
+	if not boxAsIs:
+		size = fig.get_size_inches()
+		x0 = 1/size[0]*( shift_x + 0.125*8 )
+		dx = 1/size[0]*( scale_x*0.775*8 )
+		y0 = 1/size[1]*( shift_y + 0.1*6 )
+		dy = 1/size[1]*( scale_y*0.8*6 )
+		ax.set_position([x0, y0, dx, dy])
 
 	### configure figure
 	if Xlim is not None:
@@ -1684,7 +1719,7 @@ def plotConv(A, figLabel='auto', Alabel=None, Alim='auto', title=None, **kwargs)
 			sem[i] = ars.calcSEMautocorr(A[0:i+1], hush=True)
 
 	### initialize figure
-	ars.initFig(figLabel, Xlabel, Alabel, Xlim, Alim, title, ax, "Conv", False)
+	ars.initFig(figLabel, Xlabel, Alabel, Xlim, Alim, title, ax, "Conv")
 
 	### plot data
 	if not plotAsLine:
@@ -1729,7 +1764,7 @@ def plotPoints(X, Y, figLabel='auto', Xlabel=None, Ylabel=None, Xlim=None, Ylim=
 		S = S**2 
 
 	### initialize figure
-	ars.initFig(figLabel, Xlabel, Ylabel, Xlim, Ylim, title, ax, "Points", False)
+	ars.initFig(figLabel, Xlabel, Ylabel, Xlim, Ylim, title, ax, "Points")
 
 	### plot points
 	plt.scatter(X, Y, S, marker=marker, color=color, edgecolor=edgecolor, linewidths=edgewidth, alpha=alpha, zorder=zorder, label=label)
@@ -1787,11 +1822,15 @@ def plotLine(X, Y=None, figLabel='auto', Xlabel=None, Ylabel=None, Xlim=None, Yl
 		return
 
 	### initialize figure
-	ars.initFig(figLabel, Xlabel, Ylabel, Xlim, Ylim, title, ax, "Line", False)
+	ars.initFig(figLabel, Xlabel, Ylabel, Xlim, Ylim, title, ax, "Line")
 
 	### plot line
 	line = plt.plot(X, Y, color=color, linestyle=linestyle, linewidth=linewidth, marker=marker, markersize=markersize, mew=markeredgewidth, mec=markeredgecolor, mfc=markerfacecolor, alpha=alpha, zorder=zorder,label=label)[0]
 	color = mcolors.to_rgb(line.get_color())
+
+	### add legend
+	if label is not None:
+		plt.legend()
 
 	### set auto errorbar color
 	if isinstance(errcolor, str) and errcolor == 'auto':
@@ -1844,7 +1883,7 @@ def plotDists(As, figLabel='auto', Alabel=None, Alim=None, title=None, **kwargs)
 	meds = [ np.median(A) for A in As ]
 
 	### initialize figure
-	ars.initFig(figLabel, Xlabel, Alabel, Xlim, Alim, title, ax, "Dists", False)
+	ars.initFig(figLabel, Xlabel, Alabel, Xlim, Alim, title, ax, "Dists")
 
 	### point plot
 	if plotPoints:
@@ -2143,7 +2182,7 @@ def plotHist(A, figLabel='auto', Alabel=None, nbin='auto', Alim_bin='auto', Alim
 	isDataLabeled = True if label is None else False
 
 	### initialize figure
-	ars.initFig(figLabel, Alabel, Ylabel, Alim_plot, None, title, ax, "Hist", False)
+	ars.initFig(figLabel, Alabel, Ylabel, Alim_plot, None, title, ax, "Hist")
 
 	### plot data as bins
 	if plotBins:
@@ -2389,66 +2428,10 @@ def plotHist2D(A, B, figLabel='auto', Alabel=None, Blabel=None, nbin='auto', Ali
 			return
 
 	### initialize figure
-	ars.initFig(figLabel, Alabel, Blabel, Alim_plot, Blim_plot, title, ax, "Hist2D", False)
+	ars.initFig(figLabel, Alabel, Blabel, Alim_plot, Blim_plot, title, ax, "Hist2D")
 
 	### plot histogram
 	plt.hist2d(A, B, nbin, range=[Alim_bin,Blim_bin], density=useDensity)
-
-
-### calculate and plot PMF from histogram
-def plotPMF(A, figLabel='auto', Alabel=None, nbin='auto', Alim_bin='auto', Alim_plot='auto', title=None, **kwargs):
-
-	### additional keyword args
-	zero	= 'min'		if 'zero' not in kwargs else kwargs['zero']
-	color	= 'purple'	if 'color' not in kwargs else kwargs['color']
-	ax		= None		if 'ax' not in kwargs else kwargs['ax']
-
-	### interpret input
-	if isinstance(nbin, str) and nbin == 'auto':
-		nbin = ars.optbins(A,50)
-	elif not ars.isinteger(nbin):
-		print("Error: Cannot calculate PMF - number of histogram bins must be either 'auto' or integer.\n")
-		sys.exit()
-	if isinstance(Alim_bin, str) and Alim_bin == 'auto':
-		Alim_bin = [ min(A), max(A) ]
-		if Alim_bin[0] == Alim_bin[1]:
-			print("Flag: Skipping histogram plot - all values are the same.")
-			return
-	elif not ars.isarray(Alim_bin) or len(Alim_bin) != 2:
-		print("Error: Cannot calculate PMF - variable limits must be either 'auto' or 2-element array.\n")
-		sys.exit()
-	if isinstance(Alim_plot, str) and Alim_plot == 'auto':
-		dAbin = (Alim_bin[1]-Alim_bin[0])/nbin
-		Alim_plot = [ Alim_bin[0]-dAbin/2, Alim_bin[1]+dAbin/2 ]
-	elif not ars.isarray(Alim_plot) or len(Alim_plot) != 2:
-		if Alim_plot is not None:
-			print("Error: Cannot calculate PMF - variable limits must be either 'auto' or 2-element array.\n")
-			sys.exit()
-	if zero != 'min' and zero != 'max':
-		print("Error: Cannot calculate PMF - zero must be either 'min' or 'max'.\n")
-		sys.exit()
-
-	### calcualte PMF
-	counts, bin_edges = np.histogram(A, nbin, range=Alim_bin)
-	bins = np.ones(nbin)*np.nan
-	PMF = np.ones(nbin)*np.nan
-	for i in range(nbin):
-		if counts[i] != 0:
-			PMF[i] = -np.log(counts[i])
-		bins[i] = (bin_edges[i]+bin_edges[i+1])/2
-	if zero == 'min':
-		PMF -= np.nanmin(PMF)
-	elif zero == 'max':
-		PMF -= np.nanmax(PMF)
-
-	### initialize figure
-	ars.initFig(figLabel, Alabel, "PMF [kT]", Alim_plot, None, title, ax, "PMF", False)
-
-	### plot PMF
-	plt.plot(bins, PMF, '-o', color=color)
-
-	### results
-	return bins, PMF
 
 
 ### plot umbrella sampling histograms and PMF
@@ -2594,123 +2577,6 @@ def plotBondWrite(bondWriteFile):
 ################################################################################
 ### Calculations
 
-### use wham to calculate PMF
-### tsFold used to be in a different spot, still need to change the old calls
-def calcPMF(OPs_eq, weights, OPs_ts, nbin, bin_padding=0, T=300, tsFold="timeseries/", whamMetaFile="wham_metadata.txt", whamOutFile="wham_output.txt", assumeIID=False):
-
-	### notes
-	# the weights need to be in kcal/mol*{op unit}^2.
-	# the output PMF are in kcal/mol.
-	# autocorrelation is used to calculate the correlation time (used for error bars).
-
-	### interpret input
-	if ars.isnumber(bin_padding):
-		bin_padding = [bin_padding,bin_padding]
-	elif not ars.isarray(bin_padding) or len(bin_padding) != 2:
-		print("Error: Bin padding must be number or 2-element array.")
-		sys.exit()
-
-	### prepare timeseries file names
-	ars.createEmptyFold(tsFold)
-
-	### loop over simulations
-	print("Writing timeseries...")
-	nsim = len(OPs_eq)
-	for i in range(nsim):
-		nstep = len(OPs_ts[i])
-
-		### write sep timeseries file
-		tsFile = tsFold + f"ts_sim{i:02}.txt"
-		with open(tsFile, 'w') as f:
-			for j in range(nstep):
-				f.write(f"{j} {OPs_ts[i][j]}\n")
-
-	### write wham metadata file
-	print("Writing wham metadata...")
-	print(whamMetaFile)
-	with open(whamMetaFile, 'w') as f:
-		for i in range(nsim):
-			tsFile = tsFold + f"ts_sim{i:02}.txt"
-			tau_int = 1
-			if not assumeIID:
-				tau_int += 2*ars.calcCorrTime(OPs_ts[i])
-			f.write(f"{tsFile} {OPs_eq[i]} {weights[i]} {tau_int:.2f}\n")
-
-	### wham parameters (not expected to change)
-	tol_wham = 0.001
-	ntrial_MC_wham = 10
-
-	### set wham bin limits
-	bin_min = round(min(OPs_eq)-bin_padding[0],8)
-	bin_max = round(max(OPs_eq)+bin_padding[1],8)
-
-	### run wham (from Grossfield)
-	print("Running wham...\n")
-	subprocess.call(["/Users/dduke/.local/bin/wham", str(bin_min), str(bin_max), str(nbin), str(tol_wham), str(T), "0", whamMetaFile, whamOutFile, str(ntrial_MC_wham), "37"]); print()
-
-	### read wham output, return
-	OPs_wham, PMF, PMF_err = ars.readWham(whamOutFile, nbin)
-	return OPs_wham, PMF, PMF_err
-
-
-### use wham to calculate PMF
-def calcPMF2D(OP1s_eq, OP2s_eq, w1s, w2s, OP1s_ts, OP2s_ts, nbin, bin_padding=[0,0], T=300, tsFold="timeseries/", whamMetaFile="wham_metadata.txt", whamOutFile="wham_output.txt", assumeIID=False):
-
-	### notes
-	# the weights need to be in kcal/mol*{op unit}^2.
-	# the output PMF are in kcal/mol.
-	# autocorrelation is used to calculate the correlation time (used for error bars).
-
-	### interpret input
-	if ars.isnumber(bin_padding):
-		bin_padding = [bin_padding,bin_padding,bin_padding,bin_padding]
-	elif ars.isarray(bin_padding) and len(bin_padding) == 2:
-		bin_padding = [bin_padding[0],bin_padding[0],bin_padding[1],bin_padding[1]]
-	elif not ars.isarray(bin_padding) or len(bin_padding) != 4:
-		print("Error: Bin padding must be number, 2-element array, or 4-element array.")
-		sys.exit()
-
-	### prepare timeseries file names
-	ars.createEmptyFold(tsFold)
-
-	### loop over simulations
-	print("Writing timeseries...")
-	nsim = len(OP1s_eq)
-	for i in range(nsim):
-		nstep = len(OP1s_ts[i])
-
-		### write sep timeseries file
-		tsFile = tsFold + f"ts_sim{i:03}.txt"
-		with open(tsFile, 'w') as f:
-			for j in range(nstep):
-				f.write(f"{j} {OP1s_ts[i][j]} {OP2s_ts[i][j]}\n")
-
-	### write wham metadata file
-	print("Writing wham metadata...")
-	print(whamMetaFile)
-	with open(whamMetaFile, 'w') as f:
-		for i in range(nsim):
-			tsFile = tsFold + f"ts_sim{i:03}.txt"
-			f.write(f"{tsFile} {OP1s_eq[i]} {OP2s_eq[i]} {w1s[i]} {w2s[i]}\n")
-
-	### wham parameters (not expected to change)
-	tol_wham = 0.001
-
-	### set wham bin limits
-	bin_min_x = round(min(OP1s_eq)-bin_padding[0],8)
-	bin_max_x = round(max(OP1s_eq)+bin_padding[0],8)
-	bin_min_y = round(min(OP2s_eq)-bin_padding[1],8)
-	bin_max_y = round(max(OP2s_eq)+bin_padding[1],8)
-
-	### run wham (from Grossfield)
-	print("Running wham...\n")
-	subprocess.call(["/Users/dduke/.local/bin/wham-2d", "Px=0", str(bin_min_x), str(bin_max_x), str(nbin), "Py=0", str(bin_min_y), str(bin_max_y), str(nbin), str(tol_wham), str(T), "0", whamMetaFile, whamOutFile, "1"]); print()
-
-	### read wham output, return
-	OP1s_wham, OP2s_wham, PMF = ars.readWham2D(whamOutFile, nbin)
-	return OP1s_wham, OP2s_wham, PMF
-
-
 ### shift trajectory, placing the given point at the center, optionally unwrapping molecules at boundary
 def centerPointsMolecule(points, molecules, dbox3s, center=1, unwrap=True, report=True, excludeDummy=False):
 
@@ -2757,7 +2623,7 @@ def centerPointsMolecule(points, molecules, dbox3s, center=1, unwrap=True, repor
 		for j in range(nmolecule):
 			if ars.checkAnyDummy(points_moleculed[j][i]):
 				if not excludeDummy:
-					print("Warning: Potential dummy beads detected.")
+					print("Warning: Potential dummy beads detected")
 				elif not checkAllDummy(points_moleculed[j][i]):
 					print("Error: Molecule contains mixed dummy and activated beads.\n")
 					sys.exit()
@@ -2856,13 +2722,199 @@ def calcCOM(r, dbox3, excludeDummy=False):
 	return com
 
 
-### calculate cumulative probability, given free energy
-def calcCumProb(OPs, PMF, T=300):
+### use wham to calculate PMF
+def calcPMF(OPs_eq, weights, OPs_ts, nbin, bin_padding=0, T=300, tsFold="timeseries/", whamMetaFile="wham_metadata.txt", whamOutFile="wham_output.txt", assumeIID=False):
+
+	### notes
+	# the weights need to be in kcal/mol*{op unit}^2.
+	# the output PMF are in kcal/mol.
+	# autocorrelation is used to calculate the correlation time (used for error bars).
+
+	### interpret input
+	if ars.isnumber(bin_padding):
+		bin_padding = [bin_padding,bin_padding]
+	elif not ars.isarray(bin_padding) or len(bin_padding) != 2:
+		print("Error: Bin padding must be number or 2-element array.")
+		sys.exit()
+
+	### prepare timeseries file names
+	ars.createEmptyFold(tsFold)
+
+	### loop over simulations
+	print("Writing timeseries...")
+	nsim = len(OPs_eq)
+	for i in range(nsim):
+		nstep = len(OPs_ts[i])
+
+		### write sep timeseries file
+		tsFile = tsFold + f"ts_sim{i:02}.txt"
+		with open(tsFile, 'w') as f:
+			for j in range(nstep):
+				f.write(f"{j} {OPs_ts[i][j]}\n")
+
+	### write wham metadata file
+	print("Writing wham metadata...")
+	print(whamMetaFile)
+	with open(whamMetaFile, 'w') as f:
+		for i in range(nsim):
+			tsFile = tsFold + f"ts_sim{i:02}.txt"
+			tau_int = 1
+			if not assumeIID:
+				tau_int += 2*ars.calcCorrTime(OPs_ts[i])
+			f.write(f"{tsFile} {OPs_eq[i]} {weights[i]} {tau_int:.2f}\n")
+
+	### wham parameters (not expected to change)
+	tol_wham = 0.001
+	ntrial_MC_wham = 10
+
+	### set wham bin limits
+	bin_min = round(min(OPs_eq)-bin_padding[0],8)
+	bin_max = round(max(OPs_eq)+bin_padding[1],8)
+
+	### run wham (from Grossfield)
+	print("Running wham...\n")
+	subprocess.call(["/Users/dduke/.local/bin/wham", str(bin_min), str(bin_max), str(nbin), str(tol_wham), str(T), "0", whamMetaFile, whamOutFile, str(ntrial_MC_wham), "37"]); print()
+
+	### read wham output, return
+	OPs_wham, PMF, PMF_err = ars.readWham(whamOutFile, nbin)
+	return OPs_wham, PMF, PMF_err
+
+
+### use wham to calculate PMF (in 2D)
+def calcPMF2D(OP1s_eq, OP2s_eq, w1s, w2s, OP1s_ts, OP2s_ts, nbin, bin_padding=[0,0], T=300, tsFold="timeseries/", whamMetaFile="wham_metadata.txt", whamOutFile="wham_output.txt", assumeIID=False):
+
+	### notes
+	# the weights need to be in kcal/mol*{op unit}^2.
+	# the output PMF are in kcal/mol.
+	# autocorrelation is used to calculate the correlation time (used for error bars).
+
+	### interpret input
+	if ars.isnumber(bin_padding):
+		bin_padding = [bin_padding,bin_padding,bin_padding,bin_padding]
+	elif ars.isarray(bin_padding) and len(bin_padding) == 2:
+		bin_padding = [bin_padding[0],bin_padding[0],bin_padding[1],bin_padding[1]]
+	elif not ars.isarray(bin_padding) or len(bin_padding) != 4:
+		print("Error: Bin padding must be number, 2-element array, or 4-element array.")
+		sys.exit()
+
+	### prepare timeseries file names
+	ars.createEmptyFold(tsFold)
+
+	### loop over simulations
+	print("Writing timeseries...")
+	nsim = len(OP1s_eq)
+	for i in range(nsim):
+		nstep = len(OP1s_ts[i])
+
+		### write sep timeseries file
+		tsFile = tsFold + f"ts_sim{i:03}.txt"
+		with open(tsFile, 'w') as f:
+			for j in range(nstep):
+				f.write(f"{j} {OP1s_ts[i][j]} {OP2s_ts[i][j]}\n")
+
+	### write wham metadata file
+	print("Writing wham metadata...")
+	print(whamMetaFile)
+	with open(whamMetaFile, 'w') as f:
+		for i in range(nsim):
+			tsFile = tsFold + f"ts_sim{i:03}.txt"
+			f.write(f"{tsFile} {OP1s_eq[i]} {OP2s_eq[i]} {w1s[i]} {w2s[i]}\n")
+
+	### wham parameters (not expected to change)
+	tol_wham = 0.001
+
+	### set wham bin limits
+	bin_min_x = round(min(OP1s_eq)-bin_padding[0],8)
+	bin_max_x = round(max(OP1s_eq)+bin_padding[0],8)
+	bin_min_y = round(min(OP2s_eq)-bin_padding[1],8)
+	bin_max_y = round(max(OP2s_eq)+bin_padding[1],8)
+
+	### run wham (from Grossfield)
+	print("Running wham...\n")
+	subprocess.call(["/Users/dduke/.local/bin/wham-2d", "Px=0", str(bin_min_x), str(bin_max_x), str(nbin), "Py=0", str(bin_min_y), str(bin_max_y), str(nbin), str(tol_wham), str(T), "0", whamMetaFile, whamOutFile, "1"]); print()
+
+	### read wham output, return
+	OP1s_wham, OP2s_wham, PMF = ars.readWham2D(whamOutFile, nbin)
+	return OP1s_wham, OP2s_wham, PMF
+
+
+### invert histogram to get free energy landscape
+def calcFreeEnergy(A, nbin='auto', Alim_bin='auto', T=300, zero='min'):
+
+	### interpret input
+	if isinstance(nbin, str) and nbin == 'auto':
+		nbin = ars.optbins(A,50)
+	elif not ars.isinteger(nbin):
+		print("Error: Cannot calculate free energy - number of histogram bins must be either 'auto' or integer.\n")
+		sys.exit()
+	if isinstance(Alim_bin, str) and Alim_bin == 'auto':
+		Alim_bin = [ min(A), max(A) ]
+		if Alim_bin[0] == Alim_bin[1]:
+			print("Flag: Cannot calculate free energy - all values are the same.")
+			return
+	elif not ars.isarray(Alim_bin) or len(Alim_bin) != 2:
+		print("Error: Cannot calculate free energy - variable limits must be either 'auto' or 2-element array.\n")
+		sys.exit()
+	if zero != 'min' and zero != 'max':
+		print("Error: Cannot calculate PMF - zero must be either 'min' or 'max'.\n")
+		sys.exit()
+
+	### boltzmann constant in kcal/mol
 	kT = ars.kB_kcal*T
-	Z = np.sum(np.exp(-PMF/kT))
+
+	### calcualte PMF
+	counts, bin_edges = np.histogram(A, nbin, range=Alim_bin)
+	bins = np.ones(nbin)
+	PMF = np.full(nbin,np.nan)
+	for i in range(nbin):
+		bins[i] = (bin_edges[i]+bin_edges[i+1])/2
+		if counts[i] != 0:
+			PMF[i] = -kT*np.log(counts[i])
+	if zero == 'min':
+		PMF -= np.nanmin(PMF)
+	elif zero == 'max':
+		PMF -= np.nanmax(PMF)
+
+	### results
+	return bins, PMF
+
+
+### use MC to explore free energy landscape
+def calcDistFromPMF(x_pmf, PMF, x0, dx_max, nstep, T=300):
+	kT = ars.kB_kcal*T
+	xs = np.zeros(nstep)
+	xs[0] = x0
+	PMF_current = np.interp(x0, x_pmf, PMF)
+	for i in range(nstep-1):
+		x_propose = xs[i] + dx_max*(2*np.random.random()-1)
+		PMF_propose = np.interp(x_propose, x_pmf, PMF)
+		if PMF_propose < PMF_current or np.exp(-(PMF_propose-PMF_current)/kT) > np.random.random():
+			xs[i+1] = x_propose
+			PMF_current = PMF_propose
+		else:
+			xs[i+1] = xs[i]
+	return xs
+
+
+### calculate cumulative probability, given free energy
+def calcCumProb(PMF, T=300):
+	kT = ars.kB_kcal*T
+	Z = np.nansum(np.exp(-PMF/kT))
 	p = np.exp(-PMF/kT)/Z
-	cp = np.cumsum(p)
-	return cp
+	CP = np.nancumsum(p)
+	return CP
+
+
+### calculate median from where cumulative probability passes 50%
+def calcMed(x, CP):
+	x_med = None
+	for i in range(1,len(CP)):
+		if CP[i] > 0.5:
+			x_med = x[i-1] + (x[i]-x[i-1]) * (0.5-CP[i-1])/(CP[i]-CP[i-1])
+			break
+	if x_med is None:
+		x_med = x[-1]
+	return x_med
 
 
 ### place each point in the same image as its preceeding neighbor

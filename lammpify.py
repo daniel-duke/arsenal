@@ -3,6 +3,7 @@ import numpy as np
 from scipy import stats
 import argparse
 import shutil
+import re
 import sys
 import os
 
@@ -31,6 +32,7 @@ def main():
 	parser.add_argument('--datFile',		type=str, default=None,		help='for lammps simulations, name of trajectory file')
 	parser.add_argument('--oxFiles',		type=str, nargs=2,			help='for oxdna simulations, name of topology and configuration files')
 	parser.add_argument('--clusterFile',	type=str, default=None,		help="name of clusters file")
+	parser.add_argument('--forceFile',		type=str, default=None,		help="name of external forces file")
 	parser.add_argument('--nstep-skip',		type=int, default=0, 		help="number of recorded initial steps to skip")
 	parser.add_argument('--coarse-time',	type=int, default=1, 		help="coarse factor for time steps")
 	parser.add_argument('--center',			action='store_true',		help="whether to center the trajectory")
@@ -44,6 +46,7 @@ def main():
 	datFile = args.datFile
 	oxFiles = args.oxFiles
 	clusterFile = args.clusterFile
+	forceFile = args.forceFile
 	nstep_skip = args.nstep_skip
 	coarse_time = args.coarse_time
 	style = args.style
@@ -149,11 +152,12 @@ def main():
 		if clusterFile is not None:
 			clusters = ars.readCluster(clusterFile)
 			colors = getMoleculesFromClustersB0(clusters, nba_total)
-		elif not split:
+		elif forceFile is not None:
+			clusters = readForce(forceFile)
+			colors = getMoleculesFromClustersB0(clusters, nba_total)
+		else:
 			strand_scaffold = stats.mode(strands).mode
 			colors = np.where(strands == strand_scaffold,1,2)
-		else:
-			colors = bases
 
 		### beads
 		if not split:
@@ -225,6 +229,34 @@ def convertToNm(units):
 
 	### result
 	return scale
+
+
+### read COM force file to get clusters
+def readForce(forceFile):
+	ars.checkFileExist(forceFile, "force")
+	with open(forceFile, 'r') as f:
+		content = f.read()
+	
+	### split content
+	forces = re.findall(r'\{(.*?)\}', content, re.DOTALL)
+
+	### loop over forces
+	clusters = []
+	for force in forces:
+		com_line = re.search(r'com_list\s*=\s*([0-9,\s]+)', force)
+		ref_line = re.search(r'ref_list\s*=\s*([0-9,\s]+)', force)
+
+		if com_line is None or ref_line is None:
+			continue
+
+		com_bais = [int(i) for i in com_line.group(1).replace(',', ' ').split()]
+		ref_bais = [int(i) for i in ref_line.group(1).replace(',', ' ').split()]
+
+		clusters.append(com_bais)
+		clusters.append(ref_bais)
+
+	### results
+	return clusters
 
 
 ### split particles into backbone and base sites, adding appropriate bonds
