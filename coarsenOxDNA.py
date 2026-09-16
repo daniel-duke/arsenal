@@ -27,17 +27,18 @@ def main():
 	parser.add_argument('report',type=int,nargs='?',default=0)
 	parser.add_argument('--precision',type=int,default=8)
 	parser.add_argument('--keepVelocity',action='store_true')
+	parser.add_argument('--dryRun',action='store_true')
 	args = parser.parse_args()
 
 	### read old, write new
-	readWriteOxDNA(args.datFile, args.coarse_time, args.report, args.precision, args.keepVelocity)
+	readWriteOxDNA(args.datFile, args.coarse_time, args.report, args.precision, args.keepVelocity, args.dryRun)
 
 
 ################################################################################
 ### File Managers
 
 ### read oxdna trajectory, write coarsened one
-def readWriteOxDNA(datFile, coarse_time, report, precision, keepVelocity):
+def readWriteOxDNA(datFile, coarse_time, report, precision, keepVelocity, dryRun):
 	outDatFile = addSuffix(datFile, "_coarse")
 
 	### extract metadata
@@ -72,6 +73,10 @@ def readWriteOxDNA(datFile, coarse_time, report, precision, keepVelocity):
 		print("{:1.2e} steps in trajectory".format(nstep_recorded))
 		print("{:1.2e} steps after coarsening".format(nstep_coarse))
 		i = 0
+
+	### stop before changing anything
+	if dryRun:
+		return
 
 	### write new file
 	if report: initStatusBar("Coarsening trajectory")

@@ -3,6 +3,7 @@ import numpy as np
 import math
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
+from matplotlib.ticker import MaxNLocator
 from scipy.stats import linregress
 from scipy.stats import gaussian_kde
 from scipy.stats import norm
@@ -44,6 +45,7 @@ ox2nm = 0.8518			# oxDNA length to nm
 nm2ox = 1/0.8518		# nm to oxDNA length
 ox2kcal = 8.22			# oxDNA energy to kcal/mol
 kcal2ox = 1/8.22		# kcal/mol to oxDNA energy
+nm2bohr = 1/0.529177210903	# scale factor for arsenal's raw-nm coordinates in a cube file (see writeCube)
 
 
 ################################################################################
@@ -931,12 +933,12 @@ def readWham2D(whamFile, nbin):
 	with open(whamFile, 'r') as f:
 		content = f.readlines()
 	content = ars.cleanFileContent(content)
-	op1 = np.zeros((nbin,nbin))
-	op2 = np.zeros((nbin,nbin))
-	PMF = np.zeros((nbin,nbin))
-	for i in range(nbin):
-		for j in range(nbin):
-			line = content[i*nbin+j].split()
+	op1 = np.zeros((nbin[1],nbin[0]))
+	op2 = np.zeros((nbin[1],nbin[0]))
+	PMF = np.zeros((nbin[1],nbin[0]))
+	for i in range(nbin[0]):
+		for j in range(nbin[1]):
+			line = content[i*nbin[1]+j].split()
 			op1[j,i] = line[0]
 			op2[j,i] = line[1]
 			PMF[j,i] = line[2]
@@ -1048,7 +1050,7 @@ def unpickle(pklFile, dims=None, hushExtraFlag=False):
 		nvar = len(dims)
 
 		### make into array if single value
-		if not ars.isarray(cucumber):
+		if nvar == 1:
 			cucumber = [ cucumber ]
 
 		### make sure pickle array is long enough
@@ -1072,19 +1074,23 @@ def unpickle(pklFile, dims=None, hushExtraFlag=False):
 			### single value expected
 			elif dims[i] == 0:
 				if not ars.isnumber(cucumber[i]):
-					print(f"Error: element {i} of the pickle array does not match the expected data type (number).\n")
+					print(f"Error: Element {i+1} of the pickle array does not match the expected data type (number).\n")
 					sys.exit()
 
 			### if not single value, must be array
 			elif not ars.isarray(cucumber[i]):
-				print(f"Error: element {i} of the pickle array does not match the expected data type (array).\n")
+				print(f"Error: Element {i+1} of the pickle array does not match the expected data type (array).\n")
 				sys.exit()
 
 			### if numpy array, must have correct shape
 			elif isinstance(cucumber[i], np.ndarray):
 				if len(cucumber[i].shape) != dims[i]:
-					print(f"Error: element {i} of the pickle array does not have the expected shape ({dims[i]}).\n")
+					print(f"Error: Element {i+1} of the pickle array does not have the expected shape ({dims[i]}).\n")
 					sys.exit()
+
+		### remove extra dimension if single value
+		if nvar == 1:
+			cucumber = cucumber[0]
 
 	### result
 	return cucumber
@@ -1663,7 +1669,6 @@ def initFig(figLabel='auto', Xlabel=None, Ylabel=None, Xlim=None, Ylim=None, tit
 	### additional keyword args
 	getAx			= False		if 'getAx' not in kwargs else kwargs['getAx']
 	projection		= None		if 'projection' not in kwargs else kwargs['projection']
-	Zlabel			= None		if 'Zlabel' not in kwargs else kwargs['Zlabel']
 	shift_x			= ars.shx	if 'shift_x' not in kwargs else kwargs['shift_x']
 	shift_y			= ars.shy	if 'shift_y' not in kwargs else kwargs['shift_y']
 	scale_x			= ars.scx	if 'scale_x' not in kwargs else kwargs['scale_x']
@@ -1704,8 +1709,6 @@ def initFig(figLabel='auto', Xlabel=None, Ylabel=None, Xlim=None, Ylim=None, tit
 		ax.set_xlabel(Xlabel)
 	if Ylabel is not None:
 		ax.set_ylabel(Ylabel)
-	if Zlabel is not None:
-		ax.set_zlabel(Zlabel)
 	if title is not None:
 		ax.set_title(title)
 
@@ -1835,6 +1838,7 @@ def plotLine(X, Y=None, figLabel='auto', Xlabel=None, Ylabel=None, Xlim=None, Yl
 	color			= None		if 'color' not in kwargs else kwargs['color']
 	linestyle		= '-'		if 'linestyle' not in kwargs else kwargs['linestyle']
 	linewidth		= None		if 'linewidth' not in kwargs else kwargs['linewidth']
+	drawstyle		= None		if 'drawstyle' not in kwargs else kwargs['drawstyle']
 	marker			= None		if 'marker' not in kwargs else kwargs['marker']
 	markersize		= None		if 'markersize' not in kwargs else kwargs['markersize']
 	markeredgewidth	= 'auto'	if 'markeredgewidth' not in kwargs else kwargs['markeredgewidth']
@@ -1875,7 +1879,7 @@ def plotLine(X, Y=None, figLabel='auto', Xlabel=None, Ylabel=None, Xlim=None, Yl
 	ars.initFig(figLabel, Xlabel, Ylabel, Xlim, Ylim, title, ax, "Line")
 
 	### plot line
-	line = plt.plot(X, Y, color=color, linestyle=linestyle, linewidth=linewidth, marker=marker, markersize=markersize, mew=markeredgewidth, mec=markeredgecolor, mfc=markerfacecolor, alpha=alpha, zorder=zorder,label=label)[0]
+	line = plt.plot(X, Y, color=color, linestyle=linestyle, linewidth=linewidth, drawstyle=drawstyle, marker=marker, markersize=markersize, mew=markeredgewidth, mec=markeredgecolor, mfc=markerfacecolor, alpha=alpha, zorder=zorder,label=label)[0]
 	color = mcolors.to_rgb(line.get_color())
 
 	### add legend
@@ -1892,6 +1896,108 @@ def plotLine(X, Y=None, figLabel='auto', Xlabel=None, Ylabel=None, Xlim=None, Yl
 			plt.errorbar(X, Y, E, fmt='none', ecolor=errcolor, capsize=errcapsize, elinewidth=errlinewidth, capthick=errlinewidth)
 		else:
 			plt.fill_between(X, Y-E, Y+E, color=errcolor, alpha=0.2, linewidth=0)
+
+
+### plot a nice vertical line
+def plotVline(x, figLabel='auto', Xlabel=None, Ylabel=None, Xlim=None, Ylim=None, title=None, **kwargs):
+
+	### additional keyword args
+	color			= None		if 'color' not in kwargs else kwargs['color']
+	linestyle		= '-'		if 'linestyle' not in kwargs else kwargs['linestyle']
+	linewidth		= None		if 'linewidth' not in kwargs else kwargs['linewidth']
+	alpha			= None		if 'alpha' not in kwargs else kwargs['alpha']
+	zorder			= None		if 'zorder' not in kwargs else kwargs['zorder']
+	label			= None		if 'label' not in kwargs else kwargs['label']
+	ax				= None		if 'ax' not in kwargs else kwargs['ax']
+
+	### initialize figure
+	ars.initFig(figLabel, Xlabel, Ylabel, Xlim, Ylim, title, ax, "Line")
+
+	### plot line
+	line = plt.axvline(x, color=color, linestyle=linestyle, linewidth=linewidth, alpha=alpha, zorder=zorder, label=label)
+	color = mcolors.to_rgb(line.get_color())
+
+	### add legend
+	if label is not None:
+		plt.legend()
+
+
+### plot a nice horizontal line
+def plotHline(y, figLabel='auto', Xlabel=None, Ylabel=None, Xlim=None, Ylim=None, title=None, **kwargs):
+
+	### additional keyword args
+	color			= None		if 'color' not in kwargs else kwargs['color']
+	linestyle		= '-'		if 'linestyle' not in kwargs else kwargs['linestyle']
+	linewidth		= None		if 'linewidth' not in kwargs else kwargs['linewidth']
+	alpha			= None		if 'alpha' not in kwargs else kwargs['alpha']
+	zorder			= None		if 'zorder' not in kwargs else kwargs['zorder']
+	label			= None		if 'label' not in kwargs else kwargs['label']
+	ax				= None		if 'ax' not in kwargs else kwargs['ax']
+
+	### initialize figure
+	ars.initFig(figLabel, Xlabel, Ylabel, Xlim, Ylim, title, ax, "Line")
+
+	### plot line
+	line = plt.axhline(y, color=color, linestyle=linestyle, linewidth=linewidth, alpha=alpha, zorder=zorder, label=label)
+	color = mcolors.to_rgb(line.get_color())
+
+	### add legend
+	if label is not None:
+		plt.legend()
+
+
+### plot a nice 2D landscape
+def plotLandscape(X, Y, Z, figLabel='auto', Xlabel=None, Ylabel=None, Zlabel=None, Xlim=None, Ylim=None, Zlim=None, title=None, **kwargs):
+
+	### additional keyword args
+	nlevel			= 20		if 'nlevel' not in kwargs else kwargs['nlevel']
+	alpha			= None		if 'alpha' not in kwargs else kwargs['alpha']
+	noBorder		= False		if 'noBorder' not in kwargs else kwargs['noBorder']
+	ax				= None		if 'ax' not in kwargs else kwargs['ax']
+
+	### numpify data
+	X = np.asarray(X, dtype=float)
+	Y = np.asarray(Y, dtype=float)
+	Z = np.asarray(Z, dtype=float)
+	Z_finite = Z[np.isfinite(Z)]
+
+	### interpret input
+	if Zlim is None:
+		Zlim = [ np.nanmin(Z_finite), np.nanmax(Z_finite) ]
+		extend = 'neither'
+	elif ars.isnumber(Zlim):
+		Zlim = [ np.nanmin(Z_finite), Zlim ]
+		if Zlim[1] < np.nanmax(Z_finite):
+			extend = 'max'
+		else:
+			extend = 'neither'
+	elif ars.isarray(Zlim) and len(Zlim) == 2:
+		if Zlim[0] > np.nanmin(Z_finite) and Zlim[1] < np.nanmax(Z_finite):
+			extend = 'both'
+		elif Zlim[0] > np.nanmin(Z_finite):
+			extend = 'min'
+		elif Zlim[1] < np.nanmax(Z_finite):
+			extend = 'max'
+		else:
+			extend = 'neither'
+	else:
+		print("Flag: Skipping landscape plot - z-axis limit must be integer or 2-element array.")
+		return
+
+	### initialize figure
+	ars.initFig(figLabel, Xlabel, Ylabel, Xlim, Ylim, title, ax, "Landscape")
+
+	### calculate landscape contour levels
+	levels = np.linspace(Zlim[0], Zlim[1], nlevel)
+	levels_fine = np.linspace(Zlim[0], Zlim[1], nlevel*2-1)
+	Z_clipped = np.clip(Z, Zlim[0], Zlim[1])
+
+	### plot landscape 
+	cf = plt.contourf(X, Y, Z, levels=levels_fine, extend=extend)
+	if not noBorder: plt.contour(X, Y, Z_clipped, levels=levels, colors='k', linewidths=0.2)
+	cb = plt.colorbar(cf, label=Zlabel)
+	cb.locator = MaxNLocator(integer=True)
+	cb.update_ticks()
 
 
 ### plot distributions as points, violin, or box plots
@@ -2490,6 +2596,7 @@ def plotUS(OPs_eq, weights, OPs_ts, OPs_wham, PMF, PMF_err, nbin='auto', OPlabel
 	### additional keyword args
 	useOxUnits			= False		if 'useOxUnits' not in kwargs else kwargs['useOxUnits']
 	insideLegend		= False		if 'insideLegend' not in kwargs else kwargs['insideLegend']
+	plotPMFasHist		= False		if 'plotPMFasHist' not in kwargs else kwargs['plotPMFasHist']
 	OP_precision		= 1			if 'OP_precision' not in kwargs else kwargs['OP_precision']
 	weight_precision	= 1			if 'weight_precision' not in kwargs else kwargs['weight_precision']
 
@@ -2636,7 +2743,7 @@ def centerPointsMolecule(points, molecules, dbox3s, center=1, unwrap=True, repor
 	  # not included in the center of mass calculation.
 
 	### add time dimension to single frames
-	points, ndim_add = ars.padDims(points)
+	points, ndim_add = ars.padDims(points,3)
 
 	### get counts
 	nstep = points.shape[0]
@@ -2720,7 +2827,7 @@ def centerPointsMolecule(points, molecules, dbox3s, center=1, unwrap=True, repor
 def centerPointsBead(points, dbox3s, report=True, excludeDummy=False):
 
 	### add time dimension to single frames
-	points, ndim_add = ars.padDims(points)
+	points, ndim_add = ars.padDims(points,3)
 
 	### get counts
 	nstep = points.shape[0]
@@ -2839,6 +2946,11 @@ def calcPMF2D(OP1s_eq, OP2s_eq, w1s, w2s, OP1s_ts, OP2s_ts, nbin, bin_padding=[0
 	# autocorrelation is used to calculate the correlation time (used for error bars).
 
 	### interpret input
+	if ars.isnumber(nbin):
+		nbin = [nbin,nbin]
+	elif not ars.isarray(nbin) or len(nbin) != 2:
+		print("Error: Bin padding must be number or 2-element array.")
+		sys.exit()
 	if ars.isnumber(bin_padding):
 		bin_padding = [bin_padding,bin_padding,bin_padding,bin_padding]
 	elif ars.isarray(bin_padding) and len(bin_padding) == 2:
@@ -2875,13 +2987,13 @@ def calcPMF2D(OP1s_eq, OP2s_eq, w1s, w2s, OP1s_ts, OP2s_ts, nbin, bin_padding=[0
 
 	### set wham bin limits
 	bin_min_x = round(min(OP1s_eq)-bin_padding[0],8)
-	bin_max_x = round(max(OP1s_eq)+bin_padding[0],8)
-	bin_min_y = round(min(OP2s_eq)-bin_padding[1],8)
-	bin_max_y = round(max(OP2s_eq)+bin_padding[1],8)
+	bin_max_x = round(max(OP1s_eq)+bin_padding[1],8)
+	bin_min_y = round(min(OP2s_eq)-bin_padding[2],8)
+	bin_max_y = round(max(OP2s_eq)+bin_padding[3],8)
 
 	### run wham (from Grossfield)
 	print("Running wham...\n")
-	subprocess.call(["/Users/dduke/.local/bin/wham-2d", "Px=0", str(bin_min_x), str(bin_max_x), str(nbin), "Py=0", str(bin_min_y), str(bin_max_y), str(nbin), str(tol_wham), str(T), "0", whamMetaFile, whamOutFile, "1"]); print()
+	subprocess.call(["/Users/dduke/.local/bin/wham-2d", "Px=0", str(bin_min_x), str(bin_max_x), str(nbin[0]), "Py=0", str(bin_min_y), str(bin_max_y), str(nbin[1]), str(tol_wham), str(T), "0", whamMetaFile, whamOutFile, "1"]); print()
 
 	### read wham output, return
 	OP1s_wham, OP2s_wham, PMF = ars.readWham2D(whamOutFile, nbin)
@@ -2889,7 +3001,7 @@ def calcPMF2D(OP1s_eq, OP2s_eq, w1s, w2s, OP1s_ts, OP2s_ts, nbin, bin_padding=[0
 
 
 ### invert histogram to get free energy landscape
-def calcFreeEnergy(A, nbin='auto', Alim_bin='auto', T=300, zero='min'):
+def calcFreeEnergyFromDist(A, nbin='auto', Alim_bin='auto', T=300, zero='min'):
 
 	### interpret input
 	if isinstance(nbin, str) and nbin == 'auto':
@@ -2930,41 +3042,102 @@ def calcFreeEnergy(A, nbin='auto', Alim_bin='auto', T=300, zero='min'):
 
 
 ### use MC to explore free energy landscape
-def calcDistFromPMF(x_pmf, PMF, x0, dx_max, nstep, T=300):
+def calcDistFromFreeEnergy(x, F, x0, dx_max, nstep, T=300, rng=np.random, interp='linear'):
+
+	### interpret input
+	if interp not in ['linear','step']:
+		print("Error: Unknown interpolation type.")
+		sys.exit()
+
+	### constants
+	nstep = int(nstep)
 	kT = ars.kB_kcal*T
+
+	### prepare interpolation
+	if interp == 'step':
+		func_interp = interp1d(x, F, kind='nearest')
+
+	### initialize
 	xs = np.zeros(nstep)
 	xs[0] = x0
-	PMF_current = np.interp(x0, x_pmf, PMF)
+
+	### first interpolation
+	if interp == 'linear':
+		F_current = np.interp(x0, x, F)
+	elif interp == 'step':
+		F_current = func_interp(x0)
+
+	### simulate
 	for i in range(nstep-1):
-		x_propose = xs[i] + dx_max*(2*np.random.random()-1)
-		PMF_propose = np.interp(x_propose, x_pmf, PMF)
-		if PMF_propose < PMF_current or np.exp(-(PMF_propose-PMF_current)/kT) > np.random.random():
+		x_propose = xs[i] + dx_max*(2*rng.random()-1)
+
+		### check bounds
+		if x_propose < x[0] or x_propose > x[-1]:
+			xs[i+1] = xs[i]
+			continue
+
+		### interpolate
+		if interp == 'linear':
+			F_propose = np.interp(x_propose, x, F)
+		elif interp == 'step':
+			F_propose = func_interp(x_propose)
+
+		### Metropolis
+		if F_propose < F_current or np.exp(-(F_propose-F_current)/kT) > rng.random():
 			xs[i+1] = x_propose
-			PMF_current = PMF_propose
+			F_current = F_propose
 		else:
 			xs[i+1] = xs[i]
+
+	### result
 	return xs
 
 
-### calculate cumulative probability, given free energy
-def calcCumProb(PMF, T=300):
+### calculate emperical cumulative distribution function (from data)
+def calcECDF(A):
+    A = np.sort(A)
+    n = len(A)
+    CP = np.arange(1,n+1)/n
+    return A, CP
+
+
+### calculate cumulative probability from given free energy (assuming stepwise interpolation)
+def calcECDFfromFreeEnergy(F, T=300):
 	kT = ars.kB_kcal*T
-	Z = np.nansum(np.exp(-PMF/kT))
-	p = np.exp(-PMF/kT)/Z
-	CP = np.nancumsum(p)
+	F -= np.nanmin(F)
+	p = np.exp(-F/kT)
+	p[0] /= 2
+	p[-1] /= 2
+	for i in range(1,len(F)-1):
+		if np.isnan(F[i-1]):
+			p[i] /= 2
+		if np.isnan(F[i+1]):
+			p[i] /= 2
+	Z = np.nansum(p)
+	CP = np.nancumsum(p)/Z
 	return CP
 
 
-### calculate median from where cumulative probability passes 50%
-def calcMed(x, CP):
-	x_med = None
-	for i in range(1,len(CP)):
+### calculate median from where cumulative probability passes 50% (assuming stepwise interpolation)
+def calcMedFromECDF(x, CP):
+	CP_half = (CP[1:]+CP[:-1])/2
+	CP_half = np.concatenate(([CP[0]/2],CP_half))
+	if CP_half[0] >= 0.5 or CP_half[-1] <= 0.5:
+		print("Error: Median outside the bounds of cumulative probability range.")
+		sys.exit()
+	npoint = len(x)
+	for i in range(1,npoint):
 		if CP[i] > 0.5:
-			x_med = x[i-1] + (x[i]-x[i-1]) * (0.5-CP[i-1])/(CP[i]-CP[i-1])
-			break
-	if x_med is None:
-		x_med = x[-1]
-	return x_med
+			frac = (0.5-CP_half[i-1])/(CP_half[i]-CP_half[i-1])
+			x_med = x[i-1] + frac*(x[i]-x[i-1])
+			return x_med
+
+
+### calculate mean (boltzmann-weighted) from free energy (assuming linearly-spaced x)
+def calcAvgFromFreeEnergy(x, F, T=300):
+	kT = ars.kB_kcal*T
+	Z = np.nansum(np.exp(-F/kT))
+	return np.nansum(x*np.exp(-F/kT))/Z
 
 
 ### place each point in the same image as its preceeding neighbor
@@ -2979,7 +3152,7 @@ def unwrapChain(r, dbox3):
 
 
 ### align the principal components of the given points with coordinate axes
-def alignPCs(r, indices='all', axis_ranking=[0,1,2], getPCs=False):
+def alignPCs(points, indices='all', axis_ranking=[0,1,2], getPCs=False):
 
 	### notes
 	# indices gives the points from which to center, calculate PCs, and rotate.
@@ -2988,38 +3161,144 @@ def alignPCs(r, indices='all', axis_ranking=[0,1,2], getPCs=False):
 	  # coordinates in the second; in covariance terminology, this translates to 
 	  # observations in rows and variables in columns.
 
+	### add time dimension to single frames
+	points, ndim_add = ars.padDims(points,3)
+
 	### interpret input
 	if isinstance(indices, str) and indices == 'all':
-		indices = np.arange(len(r))
+		indices = np.arange(points.shape[1])
 	elif ars.isinteger(indices):
 		indices = np.arange(indices)
 	elif not ars.isarray(indices) or not ars.isinteger(indices[0]):
 		print("Error: indices must be 'auto', integer, or int array.\n")
 		sys.exit()
 
-	### center about the given points
-	com = np.mean(r[indices], axis=0)
-	r_centered = r - com
+	### count
+	nstep = points.shape[0]
+	npoint = points.shape[1]
+	points_aligned = np.zeros((nstep,npoint,3))
+	PCs = np.zeros((nstep,3,3))
 
-	### get principal components
-	cov = np.cov(r_centered[indices], rowvar=False)				
-	eigenvalues, eigenvectors = np.linalg.eigh(cov)
-	PCs_decreasing = eigenvectors[:,np.argsort(eigenvalues)[::-1]]
-	PCs_axisRanked = PCs_decreasing[:,axis_ranking]
+	### loop over steps
+	PCs_curr = None
+	for i in range(nstep):
+		PCs_prev = PCs_curr
 
-	### enforce right-handedness
-	if np.linalg.det(PCs_axisRanked) < 0:
-		PCs_axisRanked[:,-1] *= -1
+		### center about the given points
+		com = np.mean(points[i,indices], axis=0)
+		r_centered = points[i] - com
 
-	### rotate positions, add back center
-	r_rot = r_centered @ PCs_axisRanked
-	r_aligned = r_rot + com
+		### get principal components
+		cov = np.cov(r_centered[indices], rowvar=False)				
+		eigenvalues, eigenvectors = np.linalg.eigh(cov)
+		PCs_decreasing = eigenvectors[:,np.argsort(eigenvalues)[::-1]]
+		PCs_curr = PCs_decreasing[:,axis_ranking]
+
+		### enforce right-handedness
+		if np.linalg.det(PCs_curr) < 0:
+			PCs_curr[:,-1] *= -1
+
+		### match directions with previous frame
+		if PCs_prev is not None:
+			dots = np.sum(PCs_prev * PCs_curr, axis=0)
+			PCs_curr[:,dots<0] *= -1
+
+		### rotate positions, add back center
+		points_aligned[i] = r_centered @ PCs_curr + com
+		PCs[i] = PCs_curr
+
+	### remove time dimension from single frames
+	points_aligned = ars.trimDims(points_aligned, ndim_add)
+	PCs = ars.trimDims(PCs, ndim_add)
 
 	### results
-	output = [ r_aligned ]
-	if getPCs: output.append(PCs_axisRanked)
+	output = [ points_aligned ]
+	if getPCs: output.append(PCs)
 	if len(output) == 1: output = output[0]
 	return output
+
+
+### rigidly superimpose points onto a reference structure (Kabsch algorithm)
+def kabschAlgorithm(r_real, r_ideal, indices='all', getR=False):
+
+	### notes
+	# this version of the Kabsch algorithm matches the wikipedia version, which
+	  # retains the row-vector convention throughout the calculations; other version
+	  # perform the linera algebra with column-vector notation, and others mix them
+	  # and produce incorrect results; but rest assured this one is correct.
+
+	### interpret input
+	if isinstance(indices, str) and indices == 'all':
+		indices = np.arange(len(r_real))
+	elif ars.isinteger(indices):
+		indices = np.arange(indices)
+	elif not ars.isarray(indices) or not ars.isinteger(indices[0]):
+		print("Error: indices must be 'all', integer, or int array.\n")
+		sys.exit()
+
+	### enter both sets of points
+	com_real = np.mean(r_real[indices], axis=0)
+	r_real_centered = r_real - com_real
+	com_ideal = np.mean(r_ideal[indices], axis=0)
+	r_ideal_centered = r_ideal - com_ideal
+
+	### covariance and SVD
+	H = r_real_centered[indices].T @ r_ideal_centered[indices]
+	U, S, Vt = np.linalg.svd(H)
+
+	### enforce right-handedness
+	if np.linalg.det(U@Vt) < 0:
+		U[:,-1] *= -1
+
+	### calculate rotation
+	R = U @ Vt
+
+	### rotate positions, add ideal center
+	r_real_rot = r_real_centered @ R
+	r_real_aligned = r_real_rot + com_ideal
+
+	### results
+	output = [ r_real_aligned ]
+	if getR: output.append(R)
+	if len(output) == 1: output = output[0]
+	return output
+
+
+### calculate mean structure of trajectory
+def calcMeanStructure(points, indices='all', max_iter=100, tol=1e-6):
+
+	### interpret input
+	if isinstance(indices, str) and indices == 'all':
+		indices = np.arange(len(points[0]))
+	elif ars.isinteger(indices):
+		indices = np.arange(indices)
+	elif not ars.isarray(indices) or not ars.isinteger(indices[0]):
+		print("Error: indices must be 'all', integer, or int array.\n")
+		sys.exit()
+
+	### initialize reference positions
+	r_ref = points[0].copy()
+
+	### iteratively find
+	for _ in range(max_iter):
+		points_aligned = np.zeros_like(points)
+
+		### loop over frames
+		for i, r_frame in enumerate(points):
+			R = ars.kabschAlgorithm(r_frame, r_ref, indices=indices, getR=True)[1]
+			com_frame = np.mean(r_frame[indices], axis=0)
+			com_ref = np.mean(r_ref[indices], axis=0)
+			points_aligned[i] = (r_frame - com_frame) @ R + com_ref
+
+		### check for convergence
+		r_mean = np.mean(points_aligned, axis=0)
+		rmsd = np.sqrt(np.mean(np.sum((r_mean[indices] - r_ref[indices]) ** 2, axis=1)))
+		if rmsd < tol:
+			break
+		r_ref = r_mean
+
+	### result
+	return r_mean
 
 
 ### convert oxDNA quaternion to coordinate axes
@@ -3478,20 +3757,39 @@ def factorial(n):
 ### Random
 
 ### get common nice colors
-def getColor(color):
-	if color == 'teal':
-		return np.array([0,145,147])
+def getColor(color,scaled=False):
+
+	### colors
+	if color == 'sky':
+		rgb = np.array([118,214,255])
 	elif color == 'orchid':
-		return np.array([122,129,255])
-	elif color == 'silver':
-		return np.array([214,241,241])
+		rgb = np.array([122,129,255])
+	elif color == 'teal':
+		rgb = np.array([0,145,147])
 	elif color == 'purple':
-		return np.array([68,1,84])
+		rgb = np.array([68,1,84])
+
+	### greys
+	elif color == 'mercury':
+		rgb = np.array([235,235,235])
+	elif color == 'silver':
+		rgb = np.array([214,241,241])
 	elif color == 'grey':
-		return np.array([153,153,153])
+		rgb = np.array([153,153,153])
+	elif color == 'steel':
+		rgb = np.array([122,122,122])
+
+	### unrecognized
 	else:
 		print("Error: Unknown color.\n")
 		sys.exit()
+
+	### fractional
+	if scaled:
+		rgb = rgb/255
+
+	### result
+	return rgb
 
 
 ### get colormap that matches name
@@ -3595,7 +3893,7 @@ def trimUS(op, PMF, PMF_err):
 
 
 ### add empty dimensions to array until target number of dimensions reached
-def padDims(A, ndim=3):
+def padDims(A, ndim):
 	ndim_add = max([0,ndim-len(A.shape)])
 	for i in range(ndim_add):
 		A = A[np.newaxis]
@@ -3633,6 +3931,12 @@ def checkFileExist(file, name="the", required=True, requireData=False, hush=Fals
 def addSuffix(file, suffix):
 	base, ext = os.path.splitext(file)
 	return base + suffix + ext
+
+
+### change extension
+def changeExtension(file, ext):
+	base = os.path.splitext(file)[0]
+	return base + '.' + ext
 
 
 ### creates new folder, only if it doesn't already exist

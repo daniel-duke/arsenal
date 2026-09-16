@@ -30,15 +30,18 @@ def main():
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--geoFile',		type=str, default=None,		help="for lammps simulations, name of geometry file")
 	parser.add_argument('--datFile',		type=str, default=None,		help='for lammps simulations, name of trajectory file')
-	parser.add_argument('--oxFiles',		type=str, nargs=2,			help='for oxdna simulations, name of topology and configuration files')
+	parser.add_argument('--oxFiles',		type=str, nargs=2,			help='for oxdna simulations, name of topology and configuration/trajectory files')
 	parser.add_argument('--clusterFile',	type=str, default=None,		help="name of clusters file")
 	parser.add_argument('--forceFile',		type=str, default=None,		help="name of external forces file")
 	parser.add_argument('--nstep-skip',		type=int, default=0, 		help="number of recorded initial steps to skip")
 	parser.add_argument('--coarse-time',	type=int, default=1, 		help="coarse factor for time steps")
 	parser.add_argument('--center',			action='store_true',		help="whether to center the trajectory")
+	parser.add_argument('--align',			action='store_true',		help="whether to align principal components with coordinate axes (first frame only)")
 	parser.add_argument('--split',			action='store_true',		help="whether split oxDNA particles into backbone and base beads")
 	parser.add_argument('--style',			type=str, default='mol', 	help="for lammps simulations, atom style in geometry file (mol, full, ox)")
 	parser.add_argument('--units',			type=str, default='nm', 	help="for lammps simuations, length scale of input data (nm, ang, ox)")
+	parser.add_argument('--coloring',		type=str, default='scaf', 	help="for oxDNA simulations, coloring (scaf, strand, seq)")
+	parser.add_argument('--dbox',			type=int, default=None, 	help="new box diameter (not used for centering)")
 
 	### set arguments
 	args = parser.parse_args()
@@ -49,15 +52,22 @@ def main():
 	forceFile = args.forceFile
 	nstep_skip = args.nstep_skip
 	coarse_time = args.coarse_time
+	center = args.center
+	align = args.align
 	style = args.style
 	units = args.units
-	center = args.center
 	split = args.split
+	coloring = args.coloring
+	dbox_new = args.dbox
 
 	### check for conflicting inputs
 	if geoFile is not None and oxFiles is not None:
 		print("Error: Must provide either geometry file or oxDNA files, not both.")
 		sys.exit()
+
+	### adjustments for oxDNA simulations
+	if oxFiles is not None:
+		split = True
 
 	### adjustments for split lammps simulation
 	if geoFile is not None and split: 
@@ -106,12 +116,22 @@ def main():
 			if datFile is not None:
 				points = ars.centerPointsMolecule(points, molecules, dbox3s, center='com', unwrap=False)
 
+		### align first frame
+		if align:
+			points_init, PCs_init = ars.alignPCs(points_init, getPCs=True)
+			if datFile is not None:
+				points, PCs = ars.alignPCs(points, getPCs=True)
+
 		### set colors
 		if clusterFile is not None:
 			clusters = ars.readCluster(clusterFile)
 			colors = getMoleculesFromClustersB1(clusters, len(types))
 		else:
 			colors = types
+
+		### set box diameter
+		if dbox_new is not None:
+			dbox3 = dbox_new
 
 		### beads
 		if not split:
@@ -126,6 +146,7 @@ def main():
 
 			### split and write geometry
 			axes_init = quatsToAxes(quats_init)
+			if align: axes_init = axes_init @ PCs
 			points_init, quats_init, molecules, colors, radii, bonds = splitNucleotides(points_init, axes_init, molecules, colors, bonds)
 			ars.writeGeo(outGeoFile, dbox3, points_init, molecules, colors, bonds, radii=radii, quats=quats_init)
 
@@ -148,6 +169,12 @@ def main():
 		### center trajectory
 		if center: points = ars.centerPointsMolecule(points, strands, dbox3, center='com', unwrap=True)
 
+		### align first frame
+		if align:
+			points, PCs = ars.alignPCs(points, getPCs=True)
+			if split:
+				axes = axes @ PCs[:,None]
+
 		### set colors
 		if clusterFile is not None:
 			clusters = ars.readCluster(clusterFile)
@@ -155,9 +182,20 @@ def main():
 		elif forceFile is not None:
 			clusters = readForce(forceFile)
 			colors = getMoleculesFromClustersB0(clusters, nba_total)
-		else:
+		elif coloring == 'scaf':
 			strand_scaffold = stats.mode(strands).mode
 			colors = np.where(strands == strand_scaffold,1,2)
+		elif coloring == 'strand':
+			colors = strands
+		elif coloring == 'seq':
+			colors = bases
+		else:
+			print("Error: Unrecognized coloring.")
+			sys.exit()
+
+		### set box diameter
+		if dbox_new is not None:
+			dbox3 = dbox_new
 
 		### beads
 		if not split:
@@ -220,7 +258,7 @@ def convertToNm(units):
 	if units == 'nm':
 		scale = 1
 	elif units == 'ox':
-		scale = ox2nm
+		scale = ars.ox2nm
 	elif units == 'ang':
 		scale = 0.1
 	else:
@@ -263,8 +301,8 @@ def readForce(forceFile):
 def splitNucleotides(points, axes, molecules, colors, bonds):
 
 	### add time dimension to single frames
-	points, ndim_add = ars.padDims(points)
-	axes = ars.padDims(axes, ndim=4)[0]
+	points, ndim_add = ars.padDims(points,3)
+	axes = ars.padDims(axes,4)[0]
 
 	### counts
 	nstep = points.shape[0]

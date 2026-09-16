@@ -30,7 +30,7 @@ def main():
 	args = parser.parse_args()
 
 	### read topology and configuration
-	nba_total, nstrand, strands, bases, n3s, n5s = readTop(args.topFile)
+	strands, bases, n3s, n5s, nba_total, nstrand = readTop(args.topFile)
 	points, dbox, axes = ars.readOxDNA(args.datFile, getAxes=True, keepOxUnits=True, ignorePBC=True)
 
 	### check consistency
@@ -69,7 +69,7 @@ def readTop(topFile):
 		bases[i] = line[1]
 		n3s[i] = int(line[2])
 		n5s[i] = int(line[3])
-	return nba_total, nstrand, strands, bases, n3s, n5s
+	return strands, bases, n3s, n5s, nba_total, nstrand
 
 
 ### write oxDNA topology file
