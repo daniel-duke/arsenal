@@ -127,7 +127,6 @@ def parseCaDNAno(cadFile):
 	
 	### get topology and the nucleotide(s) in each box
 	topology_scaf, occupancy_scaf = parseStrands(j, "scaf")
-	print(len(topology_scaf))
 	topology_stap, occupancy_stap = parseStrands(j, "stap")
 
 	### set scaffold sequence

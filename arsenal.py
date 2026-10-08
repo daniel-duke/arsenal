@@ -45,7 +45,6 @@ ox2nm = 0.8518			# oxDNA length to nm
 nm2ox = 1/0.8518		# nm to oxDNA length
 ox2kcal = 8.22			# oxDNA energy to kcal/mol
 kcal2ox = 1/8.22		# kcal/mol to oxDNA energy
-nm2bohr = 1/0.529177210903	# scale factor for arsenal's raw-nm coordinates in a cube file (see writeCube)
 
 
 ################################################################################
@@ -74,6 +73,7 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 	getDbox3 			= False		if 'getDbox3' not in kwargs else kwargs['getDbox3']
 	getStepsPerFrame	= False		if 'getStepsPerFrame' not in kwargs else kwargs['getStepsPerFrame']
 	keepOxUnits			= False		if 'keepOxUnits' not in kwargs else kwargs['keepOxUnits']
+	hush				= False		if 'hush' not in kwargs else kwargs['hush']
 
 	### notes
 	# assumes the bais array stores the base indices starting from 0.
@@ -86,7 +86,7 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 	# backbone bond checking defaults to max separation of ~ 0.7564 + 0.25 (r_0_backbone + Delta_FENE for oxDNA2).
 	
 	### look for file
-	print("Reading oxDNA trajectory...")
+	if not hush: print("Reading oxDNA trajectory...")
 	ars.checkFileExist(datFile, "trajectory")
 
 	### count lines
@@ -103,7 +103,7 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 
 		### check if first line looks like an oxDNA trajectory
 		if header[0][:4] != "t = ":
-			print("Error: First line of trajectory file doesn't match expected (oxDNA) format.")
+			print("Error: First line of trajectory file doesn't match expected (oxDNA) format.\n")
 			sys.exit()
 
 		### parse first header
@@ -135,9 +135,10 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 		sys.exit()
 
 	### report step counts
-	print("{:1.2e} steps in simulation".format(nstep_recorded*steps_per_frame))
-	print("{:1.2e} steps in trajectory".format(nstep_recorded))
-	print("{:1.2e} steps for analysis".format(nstep_use))
+	if not hush: 
+		print("{:1.2e} steps in simulation".format(nstep_recorded*steps_per_frame))
+		print("{:1.2e} steps in trajectory".format(nstep_recorded))
+		print("{:1.2e} steps for analysis".format(nstep_use))
 
 	### determine bases to use
 	getGroups = False
@@ -176,7 +177,7 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 	if getAxes: axes = np.zeros((nstep_use,nba_use,3,3))
 
 	### extract the data
-	ars.initStatusBar("Reading file")
+	if not hush: ars.initStatusBar("Reading file")
 	with open(datFile, 'r') as f:
 
 		### loop over steps
@@ -250,7 +251,7 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 						stretched_count += 1
 
 			### updates
-			ars.updateStatusBar(si,nstep_use)
+			if not hush: ars.updateStatusBar(si,nstep_use)
 
 			### finish or increment
 			if si+1 == nstep_use:
@@ -294,7 +295,7 @@ def getNstepOx(datFile, nstep_skip=0, coarse_time=1, hush=False):
 
 		### check if first line looks like an oxDNA trajectory
 		if header[0][:4] != "t = ":
-			print("Error: First line of trajectory file doesn't match expected (oxDNA) format.")
+			print("Error: First line of trajectory file doesn't match expected (oxDNA) format.\n")
 			sys.exit()
 
 		### parse first header
@@ -336,6 +337,7 @@ def readAtomDump(datFile, nstep_skip=0, coarse_time=1, bdis='all', coarse_points
 	extra_colIDs		= None		if 'extra_colIDs' not in kwargs else kwargs['extra_colIDs']
 	staticExtra			= False		if 'staticExtra' not in kwargs else kwargs['staticExtra']
 	getStepsPerFrame	= False		if 'getStepsPerFrame' not in kwargs else kwargs['getStepsPerFrame']
+	hush				= False		if 'hush' not in kwargs else kwargs['hush']
 
 	### notes
 	# assumes the bdis array stores the atom indices starting from 1.
@@ -344,7 +346,7 @@ def readAtomDump(datFile, nstep_skip=0, coarse_time=1, bdis='all', coarse_points
 	# all three dimensions of the box are extracted each timestep and used to get the points.
 
 	### check for file
-	print("Reading LAMMPS-style trajectory...")
+	if not hush: print("Reading LAMMPS-style trajectory...")
 	ars.checkFileExist(datFile, "trajectory")
 
 	### interpret input
@@ -369,7 +371,7 @@ def readAtomDump(datFile, nstep_skip=0, coarse_time=1, bdis='all', coarse_points
 
 		### check if first line looks like a LAMMPS trajectory
 		if header[0][:14] != "ITEM: TIMESTEP":
-			print("Error: First line of trajectory file doesn't match expected (LAMMPS) format.")
+			print("Error: First line of trajectory file doesn't match expected (LAMMPS) format.\n")
 			sys.exit()
 
 		### parse header
@@ -402,14 +404,14 @@ def readAtomDump(datFile, nstep_skip=0, coarse_time=1, bdis='all', coarse_points
 						cols_extra[j] = i-2
 
 		if col_x is None:
-			print("Error: No position column found.")
+			print("Error: No position column found.\n")
 			sys.exit()
 		if getQuats and col_quat is None:
-			print("Error: No quaternion column found.")
+			print("Error: No quaternion column found.\n")
 			sys.exit()
 		if getExtra:
 			if any(c is None for c in cols_extra):
-				print("Error: Could not find one or more extra item columns.")
+				print("Error: Could not find one or more extra item columns.\n")
 				sys.exit()
 
 		### look for next frame
@@ -435,9 +437,10 @@ def readAtomDump(datFile, nstep_skip=0, coarse_time=1, bdis='all', coarse_points
 		sys.exit()
 
 	### report step counts
-	print("{:1.2e} steps in simulation".format((nstep_recorded-1)*steps_per_frame))
-	print("{:1.2e} steps in trajectory".format(nstep_recorded))
-	print("{:1.2e} steps for analysis".format(nstep_use))
+	if not hush:
+		print("{:1.2e} steps in simulation".format((nstep_recorded-1)*steps_per_frame))
+		print("{:1.2e} steps in trajectory".format(nstep_recorded))
+		print("{:1.2e} steps for analysis".format(nstep_use))
 
 	### interpret input
 	getGroups = False
@@ -589,10 +592,11 @@ def getStepsPerFrame(datFile, coarse_time=1):
 def readDump(dumpFile, nstep_skip=0, coarse_time=1, cols='all', nstep_max='all', **kwargs):
 
 	### additional keyword arguments
-	isInt = False if 'isInt' not in kwargs else kwargs['isInt']
+	isInt	= False	if 'isInt' not in kwargs else kwargs['isInt']
+	hush	= False	if 'hush' not in kwargs else kwargs['hush']
 
 	### find dump file
-	print("Parsing LAMMPS-style dump...")
+	if not hush: print("Parsing LAMMPS-style dump...")
 	ars.checkFileExist(dumpFile, "dump")
 
 	### get metadata
@@ -610,7 +614,7 @@ def readDump(dumpFile, nstep_skip=0, coarse_time=1, cols='all', nstep_max='all',
 	elif ars.isarray(cols) and ars.isinteger(cols[0]) and max(cols) < ncol_dump:
 		cols = np.asarray(cols)
 	else:
-		print("Error: Cannot read dump - columns must be 'all', integer, or 1D integer array.")
+		print("Error: Cannot read dump - columns must be 'all', integer, or 1D integer array.\n")
 		sys.exit()
 	if isinstance(nstep_max, str) and nstep_max == 'all':
 		nstep_max = 0
@@ -696,7 +700,7 @@ def plotThermo(reportFile="report.out", cols=["E_mol","TotEng"]):
 
 	### process data
 	if not data:
-		print("Error: Could not read thermo file - no data found after header.")
+		print("Error: Could not read thermo file - no data found after header.\n")
 		sys.exit()
 	data = np.array(data)
 	data_dict = {col: data[:,i] for i,col in enumerate(header)}
@@ -797,7 +801,7 @@ def readGeo(geoFile, **kwargs):
 			### gather data for molecular atom style
 			if style == 'mol':
 				if len(line) != 6 and len(line) != 9:
-					print("Error: Incorrect number of columns for atom style molecular.")
+					print("Error: Incorrect number of columns for atom style molecular.\n")
 					sys.exit()
 				molecules[ai] = line[1]
 				types[ai] = line[2]
@@ -806,7 +810,7 @@ def readGeo(geoFile, **kwargs):
 			### gather data for full atom style
 			elif style == 'full':
 				if len(line) != 7 and len(line) != 10:
-					print("Error: Incorrect number of columns of atom style full.")
+					print("Error: Incorrect number of columns of atom style full.\n")
 					sys.exit()
 				molecules[ai] = line[1]
 				types[ai] = line[2]
@@ -817,7 +821,7 @@ def readGeo(geoFile, **kwargs):
 			### gather data for ox atom style
 			elif style == 'ox':
 				if len(line) != 8 and len(line) != 11:
-					print("Error: Incorrect number of columns of atom style oxDNA.")
+					print("Error: Incorrect number of columns of atom style oxDNA.\n")
 					sys.exit()
 				types[ai] = line[1]
 				r[ai] = line[2:5]
@@ -1038,7 +1042,7 @@ def cleanFileContent(content):
 
 
 ### load array of variables from pickle file
-def unpickle(pklFile, dims=None, hushExtraFlag=False):
+def unpickle(pklFile, dims=None, hush=False):
 
 	### read file
 	ars.checkFileExist(pklFile, "pickle")
@@ -1060,7 +1064,7 @@ def unpickle(pklFile, dims=None, hushExtraFlag=False):
 
 		### trim pickle array if too long
 		elif len(cucumber) > len(dims):
-			if not hushExtraFlag:
+			if not hush:
 				print("Flag: pickle array contained more elements than expected, ignoring some elements.")
 			cucumber = cucumber[:len(dims)]
 
@@ -1240,10 +1244,10 @@ def writeGeo(geoFile, dbox3, r, molecules='auto', types='auto', bonds=None, angl
 
 	### check ellipsoid data
 	if radii is not None and quats is None:
-		print("Error: Ellipsoid radii provided without quaternions.")
+		print("Error: Ellipsoid radii provided without quaternions.\n")
 		sys.exit()
 	if radii is None and quats is not None:
-		print("Error: Ellipsoid quaternions provided without radii.")
+		print("Error: Ellipsoid quaternions provided without radii.\n")
 		sys.exit()
 
 	### numpify data
@@ -1532,7 +1536,6 @@ def deployArsenal(srcFold=None):
 		unknown_refs = [item for item in ars_refs if item not in ars_functions and item not in ars_constants]
 		if unknown_refs:
 			print(f"Warning: referenced but not found in arsenal.py, skipping: {unknown_refs}")
-			sys.exit()
 
 		### parse references
 		if len(ars_refs) == 0:
@@ -1696,8 +1699,8 @@ def initFig(figLabel='auto', Xlabel=None, Ylabel=None, Xlim=None, Ylim=None, tit
 		size = fig.get_size_inches()
 		x0 = 1/size[0]*( shift_x + 0.125*8 )
 		dx = 1/size[0]*( scale_x*0.775*8 )
-		y0 = 1/size[1]*( shift_y + 0.1*6 )
-		dy = 1/size[1]*( scale_y*0.8*6 )
+		y0 = 1/size[1]*( shift_y + 0.11*6 )
+		dy = 1/size[1]*( scale_y*0.77*6 )
 		ax.set_position([x0, y0, dx, dy])
 
 	### configure figure
@@ -1727,6 +1730,7 @@ def plotConv(A, figLabel='auto', Alabel=None, Alim='auto', title=None, **kwargs)
 	Xlim			= 'auto'	if 'Xlim' not in kwargs else kwargs['Xlim']
 	dt_per_frame 	= None 		if 'dt_per_frame' not in kwargs else kwargs['dt_per_frame']
 	plotAsLine		= False		if 'plotAsLine' not in kwargs else kwargs['plotAsLine']
+	boxAsIs			= False		if 'boxAsIs' not in kwargs else kwargs['boxAsIs']
 	ax 				= None 		if 'ax' not in kwargs else kwargs['ax']
 
 	### numpify data
@@ -1772,7 +1776,7 @@ def plotConv(A, figLabel='auto', Alabel=None, Alim='auto', title=None, **kwargs)
 			sem[i] = ars.calcSEMautocorr(A[0:i+1], hush=True)
 
 	### initialize figure
-	ars.initFig(figLabel, Xlabel, Alabel, Xlim, Alim, title, ax, "Conv")
+	ars.initFig(figLabel, Xlabel, Alabel, Xlim, Alim, title, ax, "Conv", boxAsIs=boxAsIs)
 
 	### plot data
 	if not plotAsLine:
@@ -1805,6 +1809,7 @@ def plotPoints(X, Y, figLabel='auto', Xlabel=None, Ylabel=None, Xlim=None, Ylim=
 	errcolor		= None		if 'errcolor' not in kwargs else kwargs['errcolor']
 	errcapsize		= None		if 'errcapsize' not in kwargs else kwargs['errcapsize']
 	errlinewidth	= None		if 'errlinewidth' not in kwargs else kwargs['errlinewidth']
+	boxAsIs			= False		if 'boxAsIs' not in kwargs else kwargs['boxAsIs']
 	ax				= None		if 'ax' not in kwargs else kwargs['ax']
 
 	### numpify data
@@ -1817,7 +1822,7 @@ def plotPoints(X, Y, figLabel='auto', Xlabel=None, Ylabel=None, Xlim=None, Ylim=
 		S = S**2 
 
 	### initialize figure
-	ars.initFig(figLabel, Xlabel, Ylabel, Xlim, Ylim, title, ax, "Points")
+	ars.initFig(figLabel, Xlabel, Ylabel, Xlim, Ylim, title, ax, "Points", boxAsIs=boxAsIs)
 
 	### plot points
 	plt.scatter(X, Y, S, marker=marker, color=color, edgecolor=edgecolor, linewidths=edgewidth, alpha=alpha, zorder=zorder, label=label)
@@ -1850,6 +1855,7 @@ def plotLine(X, Y=None, figLabel='auto', Xlabel=None, Ylabel=None, Xlim=None, Yl
 	errcapsize		= None		if 'errcapsize' not in kwargs else kwargs['errcapsize']
 	errlinewidth	= None		if 'errlinewidth' not in kwargs else kwargs['errlinewidth']
 	shadeE			= False		if 'shadeE' not in kwargs else kwargs['shadeE']
+	boxAsIs			= False		if 'boxAsIs' not in kwargs else kwargs['boxAsIs']
 	ax				= None		if 'ax' not in kwargs else kwargs['ax']
 
 	### make up X
@@ -1876,7 +1882,7 @@ def plotLine(X, Y=None, figLabel='auto', Xlabel=None, Ylabel=None, Xlim=None, Yl
 		return
 
 	### initialize figure
-	ars.initFig(figLabel, Xlabel, Ylabel, Xlim, Ylim, title, ax, "Line")
+	ars.initFig(figLabel, Xlabel, Ylabel, Xlim, Ylim, title, ax, "Line", boxAsIs=boxAsIs)
 
 	### plot line
 	line = plt.plot(X, Y, color=color, linestyle=linestyle, linewidth=linewidth, drawstyle=drawstyle, marker=marker, markersize=markersize, mew=markeredgewidth, mec=markeredgecolor, mfc=markerfacecolor, alpha=alpha, zorder=zorder,label=label)[0]
@@ -1908,10 +1914,11 @@ def plotVline(x, figLabel='auto', Xlabel=None, Ylabel=None, Xlim=None, Ylim=None
 	alpha			= None		if 'alpha' not in kwargs else kwargs['alpha']
 	zorder			= None		if 'zorder' not in kwargs else kwargs['zorder']
 	label			= None		if 'label' not in kwargs else kwargs['label']
+	boxAsIs			= False		if 'boxAsIs' not in kwargs else kwargs['boxAsIs']
 	ax				= None		if 'ax' not in kwargs else kwargs['ax']
 
 	### initialize figure
-	ars.initFig(figLabel, Xlabel, Ylabel, Xlim, Ylim, title, ax, "Line")
+	ars.initFig(figLabel, Xlabel, Ylabel, Xlim, Ylim, title, ax, "Line", boxAsIs=boxAsIs)
 
 	### plot line
 	line = plt.axvline(x, color=color, linestyle=linestyle, linewidth=linewidth, alpha=alpha, zorder=zorder, label=label)
@@ -1932,10 +1939,11 @@ def plotHline(y, figLabel='auto', Xlabel=None, Ylabel=None, Xlim=None, Ylim=None
 	alpha			= None		if 'alpha' not in kwargs else kwargs['alpha']
 	zorder			= None		if 'zorder' not in kwargs else kwargs['zorder']
 	label			= None		if 'label' not in kwargs else kwargs['label']
+	boxAsIs			= False		if 'boxAsIs' not in kwargs else kwargs['boxAsIs']
 	ax				= None		if 'ax' not in kwargs else kwargs['ax']
 
 	### initialize figure
-	ars.initFig(figLabel, Xlabel, Ylabel, Xlim, Ylim, title, ax, "Line")
+	ars.initFig(figLabel, Xlabel, Ylabel, Xlim, Ylim, title, ax, "Line", boxAsIs=boxAsIs)
 
 	### plot line
 	line = plt.axhline(y, color=color, linestyle=linestyle, linewidth=linewidth, alpha=alpha, zorder=zorder, label=label)
@@ -1953,6 +1961,9 @@ def plotLandscape(X, Y, Z, figLabel='auto', Xlabel=None, Ylabel=None, Zlabel=Non
 	nlevel			= 20		if 'nlevel' not in kwargs else kwargs['nlevel']
 	alpha			= None		if 'alpha' not in kwargs else kwargs['alpha']
 	noBorder		= False		if 'noBorder' not in kwargs else kwargs['noBorder']
+	boxAsIs			= False		if 'boxAsIs' not in kwargs else kwargs['boxAsIs']
+	cbar_pad		= 0.32		if 'cbar_pad' not in kwargs else kwargs['cbar_pad']
+	cbar_width		= 0.23		if 'cbar_aspect' not in kwargs else kwargs['cbar_aspect']
 	ax				= None		if 'ax' not in kwargs else kwargs['ax']
 
 	### numpify data
@@ -1985,8 +1996,8 @@ def plotLandscape(X, Y, Z, figLabel='auto', Xlabel=None, Ylabel=None, Zlabel=Non
 		return
 
 	### initialize figure
-	ars.initFig(figLabel, Xlabel, Ylabel, Xlim, Ylim, title, ax, "Landscape")
-
+	ax = ars.initFig(figLabel, Xlabel, Ylabel, Xlim, Ylim, title, ax, "Landscape", boxAsIs=boxAsIs, getAx=True)[1]
+	
 	### calculate landscape contour levels
 	levels = np.linspace(Zlim[0], Zlim[1], nlevel)
 	levels_fine = np.linspace(Zlim[0], Zlim[1], nlevel*2-1)
@@ -1995,7 +2006,17 @@ def plotLandscape(X, Y, Z, figLabel='auto', Xlabel=None, Ylabel=None, Zlabel=Non
 	### plot landscape 
 	cf = plt.contourf(X, Y, Z, levels=levels_fine, extend=extend)
 	if not noBorder: plt.contour(X, Y, Z_clipped, levels=levels, colors='k', linewidths=0.2)
-	cb = plt.colorbar(cf, label=Zlabel)
+	
+	### colorbar axis
+	box = ax.get_position()
+	size = plt.figure(figLabel).get_size_inches()
+	dx_ax_inches = (box.x1-box.x0)*size[0]
+	x0 = (dx_ax_inches+cbar_pad) / dx_ax_inches
+	dx = cbar_width / dx_ax_inches
+	cax = ax.inset_axes([x0, 0, dx, 1])
+
+	### plot colorbar
+	cb = plt.colorbar(cf, cax=cax, label=Zlabel)
 	cb.locator = MaxNLocator(integer=True)
 	cb.update_ticks()
 
@@ -2020,6 +2041,7 @@ def plotDists(As, figLabel='auto', Alabel=None, Alim=None, title=None, **kwargs)
 	pointalpha		= 0.1		if 'pointalpha' not in kwargs else kwargs['pointalpha']
 	flieralpha		= 0.6		if 'flieralpha' not in kwargs else kwargs['flieralpha']
 	label			= None		if 'label' not in kwargs else kwargs['label']
+	boxAsIs			= False		if 'boxAsIs' not in kwargs else kwargs['boxAsIs']
 	ax				= None		if 'ax' not in kwargs else kwargs['ax']
 
 	### ensure valid input
@@ -2039,7 +2061,7 @@ def plotDists(As, figLabel='auto', Alabel=None, Alim=None, title=None, **kwargs)
 	meds = [ np.median(A) for A in As ]
 
 	### initialize figure
-	ars.initFig(figLabel, Xlabel, Alabel, Xlim, Alim, title, ax, "Dists")
+	ars.initFig(figLabel, Xlabel, Alabel, Xlim, Alim, title, ax, "Dists", boxAsIs=boxAsIs)
 
 	### point plot
 	if plotPoints:
@@ -2147,6 +2169,7 @@ def plotHist(A, figLabel='auto', Alabel=None, nbin='auto', Alim_bin='auto', Alim
 	xtick_spacing	= None		if 'xtick_spacing' not in kwargs else kwargs['xtick_spacing']
 	ytick_spacing	= None		if 'ytick_spacing' not in kwargs else kwargs['ytick_spacing']
 	ax				= None		if 'ax' not in kwargs else kwargs['ax']
+	boxAsIs			= False		if 'boxAsIs' not in kwargs else kwargs['boxAsIs']
 	hush			= True		if 'hush' not in kwargs else kwargs['hush']
 
 	### clean data
@@ -2338,7 +2361,7 @@ def plotHist(A, figLabel='auto', Alabel=None, nbin='auto', Alim_bin='auto', Alim
 	isDataLabeled = True if label is None else False
 
 	### initialize figure
-	ars.initFig(figLabel, Alabel, Ylabel, Alim_plot, None, title, ax, "Hist")
+	ars.initFig(figLabel, Alabel, Ylabel, Alim_plot, None, title, ax, "Hist", boxAsIs=boxAsIs)
 
 	### plot data as bins
 	if plotBins:
@@ -2538,6 +2561,7 @@ def plotHist2D(A, B, figLabel='auto', Alabel=None, Blabel=None, nbin='auto', Ali
 
 	### additional keyword args
 	useDensity	= False		if 'useDensity' not in kwargs else kwargs['useDensity']
+	boxAsIs		= False		if 'boxAsIs' not in kwargs else kwargs['boxAsIs']
 	ax			= None		if 'ax' not in kwargs else kwargs['ax']
 
 	### clean data
@@ -2584,7 +2608,7 @@ def plotHist2D(A, B, figLabel='auto', Alabel=None, Blabel=None, nbin='auto', Ali
 			return
 
 	### initialize figure
-	ars.initFig(figLabel, Alabel, Blabel, Alim_plot, Blim_plot, title, ax, "Hist2D")
+	ars.initFig(figLabel, Alabel, Blabel, Alim_plot, Blim_plot, title, ax, "Hist2D", boxAsIs=boxAsIs)
 
 	### plot histogram
 	plt.hist2d(A, B, nbin, range=[Alim_bin,Blim_bin], density=useDensity)
@@ -2645,16 +2669,30 @@ def plotUS(OPs_eq, weights, OPs_ts, OPs_wham, PMF, PMF_err, nbin='auto', OPlabel
 	plt.title(titlePMF)
 
 
-### calculate and plot mean squared displacement
-def plotMSD(points, dbox3, dt_per_frame, nbin=10, figLabel="MSD", Xlabel=None, Ylabel=None, title=None):
+### plot mean squared displacement
+def calcMSD(points, dbox3=None, dt_per_frame=1, nbin=10, getData=False, getNdim=False):
 
-	### define center of mass function
-	if len(points.shape) == 2:
+	### diffusion of single value
+	if len(points.shape) == 1:
+		ndim = 1
 		def getCOM(point):
 			return point
+
+	### diffusion of single bead
+	if len(points.shape) == 2:
+		ndim = points.shape[1]
+		def getCOM(point):
+			return point
+
+	### diffusion of cluster of beads 
 	elif len(points.shape) == 3:
-		def getCOM(points):
-			return ars.calcCOM(points,dbox3)
+		ndim = points.shape[2]
+		if dbox3 is not None:
+			def getCOM(points):
+				return ars.calcCOM(points,dbox3)
+		else:
+			def getCOM(points):
+				return np.mean(points,axis=0)
 
 	### calculate MSD
 	nstep = int(points.shape[0])
@@ -2670,17 +2708,34 @@ def plotMSD(points, dbox3, dt_per_frame, nbin=10, figLabel="MSD", Xlabel=None, Y
 		pbc = np.zeros(3)
 		for i in range(1, nstep_bin):
 			com = getCOM(points[q*nstep_bin+i])
-			pbc += np.round((com - com_prev) / dbox3).astype(int)
-			dis2[i,q] += np.sum((com - pbc*dbox3 - com0)**2)
+			if dbox3 is not None:
+				pbc += dbox3 * np.round((com - com_prev) / dbox3)
+			dis2[i,q] += np.sum((com - pbc - com0)**2)
 			com_prev = com
 	MSD = np.mean(dis2, axis=1)
 	slope = linregress(time, MSD)[0]
-	D = slope/6
+	D = slope/(2*ndim)
+
+	### result
+	output = [ D ]
+	if getData: output.append(time)
+	if getData: output.append(dis2)
+	if getData: output.append(MSD)
+	if getNdim: output.append(ndim)
+	if len(output) == 1: output = output[0]
+	return output
+
+
+### plot mean squared displacement
+def plotMSD(points, dbox3=None, dt_per_frame=1, nbin=10, figLabel="MSD", Xlabel=None, Ylabel=None, title=None):
+
+	### do the calculation
+	D, time, dis2, MSD, ndim = calcMSD(points, dbox3, dt_per_frame, nbin, getData=True, getNdim=True)
 
 	### plot MSD
 	plt.figure(figLabel)
 	plt.plot(time, MSD)
-	plt.plot(time, slope*time)
+	plt.plot(time, D*2*ndim*time)
 	for q in range(min(nbin,10)):
 		plt.plot(time, dis2[:,q], 'black', alpha=0.2)
 	plt.xlabel(Xlabel)
@@ -2759,7 +2814,7 @@ def centerPointsMolecule(points, molecules, dbox3s, center=1, unwrap=True, repor
 		print("Error: Cannot center points - dbox3s must be number, nstep-element array, or nstep x 3 array.\n")
 		sys.exit()
 	if len(molecules) < npoint:
-		print("Error: Cannot center points - molecules must be npoint-element array")
+		print("Error: Cannot center points - molecules must be npoint-element array.\n")
 		sys.exit()
 	elif len(molecules) > npoint:
 		print("Warning: Molecules array has too many values, only using the first npoint values.")
@@ -2880,7 +2935,7 @@ def calcCOM(r, dbox3, excludeDummy=False):
 
 
 ### use wham to calculate PMF
-def calcPMF(OPs_eq, weights, OPs_ts, nbin, bin_padding=0, T=300, tsFold="timeseries/", whamMetaFile="wham_metadata.txt", whamOutFile="wham_output.txt", assumeIID=False):
+def calcPMF(OPs_eq, weights, OPs_ts, nbin, bin_padding=0, T=300, tsFold="timeseries/", whamMetaFile="wham_metadata.txt", whamOutFile="wham_output.txt", assumeIID=False, hush=True):
 
 	### notes
 	# the weights need to be in kcal/mol*{op unit}^2.
@@ -2898,7 +2953,7 @@ def calcPMF(OPs_eq, weights, OPs_ts, nbin, bin_padding=0, T=300, tsFold="timeser
 	ars.createEmptyFold(tsFold)
 
 	### loop over simulations
-	print("Writing timeseries...")
+	print("Writing timeseries files...")
 	nsim = len(OPs_eq)
 	for i in range(nsim):
 		nstep = len(OPs_ts[i])
@@ -2910,8 +2965,7 @@ def calcPMF(OPs_eq, weights, OPs_ts, nbin, bin_padding=0, T=300, tsFold="timeser
 				f.write(f"{j} {OPs_ts[i][j]}\n")
 
 	### write wham metadata file
-	print("Writing wham metadata...")
-	print(whamMetaFile)
+	print("Writing metadata file...")
 	with open(whamMetaFile, 'w') as f:
 		for i in range(nsim):
 			tsFile = tsFold + f"ts_sim{i:02}.txt"
@@ -2929,16 +2983,23 @@ def calcPMF(OPs_eq, weights, OPs_ts, nbin, bin_padding=0, T=300, tsFold="timeser
 	bin_max = round(max(OPs_eq)+bin_padding[1],8)
 
 	### run wham (from Grossfield)
-	print("Running wham...\n")
-	subprocess.call(["/Users/dduke/.local/bin/wham", str(bin_min), str(bin_max), str(nbin), str(tol_wham), str(T), "0", whamMetaFile, whamOutFile, str(ntrial_MC_wham), "37"]); print()
+	result = subprocess.run(["/Users/dduke/.local/bin/wham", str(bin_min), str(bin_max), str(nbin), str(tol_wham), str(T), "0", whamMetaFile, whamOutFile, str(ntrial_MC_wham), "37"], capture_output=hush)
+	if not hush: print()
+
+	### check for failure
+	if result.returncode != 0:
+		print("WHAM failed, with the following output:\n")
+		print(result.stdout.decode("utf-8"))
+		sys.exit()
 
 	### read wham output, return
+	print("WHAM! ...converged.\n")
 	OPs_wham, PMF, PMF_err = ars.readWham(whamOutFile, nbin)
 	return OPs_wham, PMF, PMF_err
 
 
 ### use wham to calculate PMF (in 2D)
-def calcPMF2D(OP1s_eq, OP2s_eq, w1s, w2s, OP1s_ts, OP2s_ts, nbin, bin_padding=[0,0], T=300, tsFold="timeseries/", whamMetaFile="wham_metadata.txt", whamOutFile="wham_output.txt", assumeIID=False):
+def calcPMF2D(OP1s_eq, OP2s_eq, w1s, w2s, OP1s_ts, OP2s_ts, nbin, bin_padding=[0,0], T=300, tsFold="timeseries/", whamMetaFile="wham_metadata.txt", whamOutFile="wham_output.txt", assumeIID=False, hush=True):
 
 	### notes
 	# the weights need to be in kcal/mol*{op unit}^2.
@@ -2963,7 +3024,7 @@ def calcPMF2D(OP1s_eq, OP2s_eq, w1s, w2s, OP1s_ts, OP2s_ts, nbin, bin_padding=[0
 	ars.createEmptyFold(tsFold)
 
 	### loop over simulations
-	print("Writing timeseries...")
+	print("Writing timeseries files...")
 	nsim = len(OP1s_eq)
 	for i in range(nsim):
 		nstep = len(OP1s_ts[i])
@@ -2975,8 +3036,7 @@ def calcPMF2D(OP1s_eq, OP2s_eq, w1s, w2s, OP1s_ts, OP2s_ts, nbin, bin_padding=[0
 				f.write(f"{j} {OP1s_ts[i][j]} {OP2s_ts[i][j]}\n")
 
 	### write wham metadata file
-	print("Writing wham metadata...")
-	print(whamMetaFile)
+	print("Writing metadata file...")
 	with open(whamMetaFile, 'w') as f:
 		for i in range(nsim):
 			tsFile = tsFold + f"ts_sim{i:03}.txt"
@@ -2992,10 +3052,17 @@ def calcPMF2D(OP1s_eq, OP2s_eq, w1s, w2s, OP1s_ts, OP2s_ts, nbin, bin_padding=[0
 	bin_max_y = round(max(OP2s_eq)+bin_padding[3],8)
 
 	### run wham (from Grossfield)
-	print("Running wham...\n")
-	subprocess.call(["/Users/dduke/.local/bin/wham-2d", "Px=0", str(bin_min_x), str(bin_max_x), str(nbin[0]), "Py=0", str(bin_min_y), str(bin_max_y), str(nbin[1]), str(tol_wham), str(T), "0", whamMetaFile, whamOutFile, "1"]); print()
+	result = subprocess.run(["/Users/dduke/.local/bin/wham-2d", "Px=0", str(bin_min_x), str(bin_max_x), str(nbin[0]), "Py=0", str(bin_min_y), str(bin_max_y), str(nbin[1]), str(tol_wham), str(T), "0", whamMetaFile, whamOutFile, "1"], capture_output=hush);
+	if not hush: print()
+
+	### check for failure
+	if result.returncode != 0:
+		print("WHAM failed, with the following output:\n")
+		print(result.stdout.decode("utf-8"))
+		sys.exit()
 
 	### read wham output, return
+	print("WHAM! ...converged.\n")
 	OP1s_wham, OP2s_wham, PMF = ars.readWham2D(whamOutFile, nbin)
 	return OP1s_wham, OP2s_wham, PMF
 
@@ -3046,7 +3113,7 @@ def calcDistFromFreeEnergy(x, F, x0, dx_max, nstep, T=300, rng=np.random, interp
 
 	### interpret input
 	if interp not in ['linear','step']:
-		print("Error: Unknown interpolation type.")
+		print("Error: Unknown interpolation type.\n")
 		sys.exit()
 
 	### constants
@@ -3123,7 +3190,7 @@ def calcMedFromECDF(x, CP):
 	CP_half = (CP[1:]+CP[:-1])/2
 	CP_half = np.concatenate(([CP[0]/2],CP_half))
 	if CP_half[0] >= 0.5 or CP_half[-1] <= 0.5:
-		print("Error: Median outside the bounds of cumulative probability range.")
+		print("Error: Median outside the bounds of cumulative probability range.\n")
 		sys.exit()
 	npoint = len(x)
 	for i in range(1,npoint):
@@ -3577,7 +3644,7 @@ def calcCorrTime(A, hush=False):
 
 	### check for unconverged correlation
 	if tau == None:
-		print("Error: Correlation time estimate did not converge.")
+		print("Error: Correlation time estimate did not converge.\n")
 		sys.exit()
 
 	### check for uncorrelated data
@@ -3587,7 +3654,7 @@ def calcCorrTime(A, hush=False):
 	### check for poor estimate
 	tau_int = 1+2*tau
 	if not hush and len(A) < 50*tau_int:
-		print("Warning: Correlation time estimate could be inaccurate.")
+		print("Warning: Correlation time estimate could be inaccurate.\n")
 	
 	### result
 	return tau
@@ -3748,7 +3815,7 @@ def calcNormStats(A, weights=None):
 ### calculate factorial
 def factorial(n):
 	if not ars.isinteger(n):
-		print("Error: Cannot calculate factorial of float.")
+		print("Error: Cannot calculate factorial of float.\n")
 		sys.exit()
 	return np.prod(np.arange(1,n+1))
 
@@ -3852,6 +3919,26 @@ def updateStatusBar(i, n, length=30, units='steps'):
 		nchar_add = nchar_after - nchar_before
 		print("=" * nchar_add, end='', flush=True)
 		if i == n-1:
+			print(flush=True)
+
+
+### print status bar during loop iterations
+def updateStatusBarContinuous(t, dt, t_max, length=30):
+
+	### dynamic output
+	if sys.stdout.isatty():
+		if t < t_max:
+			print(f"\r-- {int(t/t_max*100)}% complete", end='', flush=True)
+		else:
+			print(f"\r-- 100% complete")
+
+	### static output
+	else:
+		nchar_before = int(length*(t-dt) // t_max)
+		nchar_after = int(length*t // t_max)
+		nchar_add = nchar_after - nchar_before
+		print("=" * nchar_add, end='', flush=True)
+		if t == t_max:
 			print(flush=True)
 
 
@@ -3970,7 +4057,7 @@ def compressArr(A):
 ### clip and normalize between two values
 def clipNorm(x, a, b):
 	if b <= a:
-		print("Error: Upper clip limit must be greater than lower clip limit.")
+		print("Error: Upper clip limit must be greater than lower clip limit.\n")
 		sys.exit()
 	return np.clip((x - a) / (b - a), 0, 1)
 

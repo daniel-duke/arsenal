@@ -271,29 +271,39 @@ def convertToNm(units):
 
 ### read COM force file to get clusters
 def readForce(forceFile):
+
+	### read and clean file
 	ars.checkFileExist(forceFile, "force")
 	with open(forceFile, 'r') as f:
-		content = f.read()
-	
-	### split content
-	forces = re.findall(r'\{(.*?)\}', content, re.DOTALL)
+		content = f.readlines()
+	content = ars.cleanFileContent(content)
 
-	### loop over forces
+	### loop over lines
 	clusters = []
-	for force in forces:
-		com_line = re.search(r'com_list\s*=\s*([0-9,\s]+)', force)
-		ref_line = re.search(r'ref_list\s*=\s*([0-9,\s]+)', force)
+	for line in content:
 
-		if com_line is None or ref_line is None:
-			continue
+		### look for appropriate keywords
+		if line.startswith("com_list") or line.startswith("ref_list") or line.startswith("particle") or line.startswith("ref_particle"):
+			
+			### extract the numbers
+			indices_str = line.split("=", 1)[1]
+			tokens = indices_str.replace(',', ' ').split()
 
-		com_bais = [int(i) for i in com_line.group(1).replace(',', ' ').split()]
-		ref_bais = [int(i) for i in ref_line.group(1).replace(',', ' ').split()]
+			### check for force on all particles
+			if tokens[0] == '-1' or tokens[0] == 'all':
+				continue
 
-		clusters.append(com_bais)
-		clusters.append(ref_bais)
+			### get index list
+			indices = []
+			for token in tokens:
+				if "-" in token:
+					start, end = token.split("-")
+					indices.extend(range(int(start), int(end) + 1))
+				else:
+					indices.append(int(token))
+			clusters.append(indices)
 
-	### results
+	### result
 	return clusters
 
 

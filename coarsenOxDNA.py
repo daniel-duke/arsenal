@@ -54,9 +54,12 @@ def readWriteOxDNA(datFile, coarse_time, report, precision, keepVelocity, dryRun
 		line = f.readline()
 		nba_total = 0
 		line = f.readline()
-		while line[0] != 't':
+		while line and line[0] != 't':
 			nba_total += 1
 			line = f.readline()
+		if not line:
+			print("Error: Trajectory needs at least two frames.\n")
+			sys.exit(1)
 		steps_per_frame = int(line.split()[2]) - step_initial
 
 	### count lines
@@ -93,6 +96,10 @@ def readWriteOxDNA(datFile, coarse_time, report, precision, keepVelocity, dryRun
 				b_line = fin.readline()
 				e_line = fin.readline()
 				data_lines = [fin.readline() for _ in range(nba_total)]
+
+				### stop at incomplete frame (simulation still writing)
+				if not data_lines[-1].endswith('\n'):
+					break
 
 				### skip unused frames
 				step = int(t_line.split()[2])

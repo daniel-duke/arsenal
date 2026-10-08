@@ -35,8 +35,14 @@ def main():
 	parser.add_argument('--sigma',			type=float, default=0.5,	help="Gaussian smoothing width, in nm (0 to disable)")
 	parser.add_argument('--noSplit',		action='store_true',		help="plot nucleotides as single bead at COM")
 	parser.add_argument('--align',			action='store_true',		help="rotate mean structure to align its principal components with the box")
+	parser.add_argument('--noAlign',		action='store_true',		help="do not align the frames (e.g. if the structure is pinned in the box); frames are used as they are")
 	parser.add_argument('--writeOvito',		action='store_true',		help="write an ovito scene file")
 	args = parser.parse_args()
+
+	### check for conflicting inputs
+	if args.noAlign and args.align:
+		print("Error: Cannot rotate the mean structure to its principal components without aligning the frames.")
+		sys.exit()
 
 
 ################################################################################
@@ -58,25 +64,33 @@ def main():
 	bais_core = np.setdiff1d(bais_all, bais_brush)
 	nbrush = len(clusters)
 
-	### read and center trajectory
+	### read trajectory, fixing periodic boundary breaks (and centering, unless frames are not being aligned)
 	points, dbox3, axes = ars.readOxDNA(args.datFile, args.nstep_skip, args.coarse_time, getDbox3=True, getAxes=True)
-	points = ars.centerPointsMolecule(points, strands, dbox3, center='com', unwrap=True)
+	points = ars.centerPointsMolecule(points, strands, dbox3, center='none' if args.noAlign else 'com', unwrap=True)
 	nstep = points.shape[0]
 
-	### calculate reference structure
-	r_ref = ars.calcMeanStructure(points, bais_core)
-	if args.align: r_ref = ars.alignPCs(r_ref, bais_core)
+	### use the raw frames and their plain average structure
+	if args.noAlign:
+		points_aligned = points
+		r_ref = np.mean(points, axis=0)
+		a1_sum = np.sum(axes[:,:,0], axis=0)
+		a3_sum = np.sum(axes[:,:,2], axis=0)
 
-	### calculate mean structure
-	ars.initStatusBar("Aligning")
-	points_aligned = np.zeros((nstep,nba_total,3))
-	a1_sum = np.zeros((nba_total,3))
-	a3_sum = np.zeros((nba_total,3))
-	for i in range(nstep):
-		points_aligned[i], R = ars.kabschAlgorithm(points[i], r_ref, indices=bais_core, getR=True)
-		a1_sum += axes[i,:,0] @ R
-		a3_sum += axes[i,:,2] @ R
-		ars.updateStatusBar(i,nstep)
+	### align every frame to the mean structure of the core
+	else:
+		r_ref = ars.calcMeanStructure(points, bais_core)
+		if args.align: r_ref = ars.alignPCs(r_ref, bais_core)
+
+		### calculate mean structure
+		ars.initStatusBar("Aligning")
+		points_aligned = np.zeros((nstep,nba_total,3))
+		a1_sum = np.zeros((nba_total,3))
+		a3_sum = np.zeros((nba_total,3))
+		for i in range(nstep):
+			points_aligned[i], R = ars.kabschAlgorithm(points[i], r_ref, indices=bais_core, getR=True)
+			a1_sum += axes[i,:,0] @ R
+			a3_sum += axes[i,:,2] @ R
+			ars.updateStatusBar(i,nstep)
 
 	### renormalize the averaged orientations
 	a1_ref = a1_sum / np.linalg.norm(a1_sum, axis=1, keepdims=True)
@@ -128,7 +142,7 @@ def main():
 		### write cube file
 		outCubeFiles.append(outFold + f"brush{c+1}.cube")
 		writeCube(outCubeFiles[c], grid, origin, np.full(3,args.voxel))
-		ars.updateStatusBar(c+1,nbrush+1)
+		ars.updateStatusBar(c+1,nbrush+1,units="brushes")
 
 	### write ovito scene
 	if args.writeOvito:

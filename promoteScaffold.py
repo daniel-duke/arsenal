@@ -15,7 +15,8 @@ import sys
 # this script runs from the command line with two arguments: (1) the topology
   # file, (2) the configuration file.
 # the script outputs files with the same names as the inputs, modified with
-  # "_reorder" appended (but before the extension).
+  # "_reordered" appended (but before the extension), unless --overwrite is
+  # given, in which case the input files are overwritten instead.
 
 
 ################################################################################
@@ -25,13 +26,15 @@ def main():
 
 	### get arguments
 	parser = argparse.ArgumentParser()
-	parser.add_argument('topFile', type=str)
-	parser.add_argument('datFile', type=str)
+	parser.add_argument('topFile',		type=str, default=None,		help="name of topology file")
+	parser.add_argument('datFile',		type=str, default=None,		help="name of configuration file")
+	parser.add_argument('--overwrite',	action='store_true',		help="overwrite the input files")
+	parser.add_argument('--hush',		action='store_true',		help="avoid printing output")
 	args = parser.parse_args()
 
 	### read topology and configuration
 	strands, bases, n3s, n5s, nba_total, nstrand = readTop(args.topFile)
-	points, dbox, axes = ars.readOxDNA(args.datFile, getAxes=True, keepOxUnits=True, ignorePBC=True)
+	points, dbox, axes = ars.readOxDNA(args.datFile, getAxes=True, keepOxUnits=True, ignorePBC=True, hush=args.hush)
 
 	### check consistency
 	if points.shape[1] != nba_total:
@@ -41,12 +44,12 @@ def main():
 	### put scaffold first
 	order, strands_new, bases_new, n3s_new, n5s_new = putScaffoldFirst(strands, bases, n3s, n5s)
 
-	### write reordered topology
-	outTopFile = ars.addSuffix(args.topFile, "_reorder")
-	writeTop(outTopFile, nba_total, nstrand, strands_new, bases_new, n3s_new, n5s_new)
+	### output file names
+	outTopFile = args.topFile if args.overwrite else ars.addSuffix(args.topFile, "_reordered")
+	outDatFile = args.datFile if args.overwrite else ars.addSuffix(args.datFile, "_reordered")
 
-	### write reordered configuration
-	outDatFile = ars.addSuffix(args.datFile, "_reorder")
+	### write reordered topology and configuration
+	writeTop(outTopFile, nba_total, nstrand, strands_new, bases_new, n3s_new, n5s_new)
 	ars.writeOxDNA(outDatFile, points[:,order], axes[:,order], dbox)
 
 
