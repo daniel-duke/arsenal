@@ -104,7 +104,7 @@ def applyPBC(r, dbox):
 
 
 ### determine if file exists
-def checkFileExist(file, name="the", required=True, requireData=False):
+def checkFileExist(file, name="the", required=True, requireData=False, hush=False):
 	if os.path.isfile(file):
 		if not requireData or os.path.getsize(file):
 			return True
@@ -118,7 +118,8 @@ def checkFileExist(file, name="the", required=True, requireData=False):
 			print(file + "\n")
 			sys.exit()
 		else:
-			print(f"Flag: Could not find {name} file.")
+			if not hush:
+				print(f"Flag: Could not find {name} file.")
 			return False
 
 
@@ -141,7 +142,7 @@ def initStatusBar(description, length=30):
 			print("Flag: Status bar description too long.")
 			description = description[:length-6]
 		pad = length - len(description) - 4
-		print(f"\n{'='*(length)}")
+		print(f"{'='*(length)}")
 		print(f"-- {description} {'-'*pad}")
 
 
@@ -151,7 +152,7 @@ def updateStatusBar(i, n, length=30, units='steps'):
 	### dynamic output
 	if sys.stdout.isatty():
 		if i < n-1:
-		 	print(f"\r-- {i+1}/{n} {units}", end='', flush=True)
+			print(f"\r-- {i+1}/{n} {units}", end='', flush=True)
 		else:
 			print(f"\r-- {n}/{n} {units}")
 
@@ -162,7 +163,7 @@ def updateStatusBar(i, n, length=30, units='steps'):
 		nchar_add = nchar_after - nchar_before
 		print("=" * nchar_add, end='', flush=True)
 		if i == n-1:
-			print("\n", flush=True)
+			print(flush=True)
 
 
 ### run the script

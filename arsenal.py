@@ -2835,7 +2835,7 @@ def centerPointsMolecule(points, molecules, dbox3s, center=1, unwrap=True, repor
 		for j in range(nmolecule):
 			if ars.checkAnyDummy(points_moleculed[j][i]):
 				if not excludeDummy:
-					print("Warning: Potential dummy beads detected")
+					print("Warning: Potential dummy beads detected.")
 				elif not checkAllDummy(points_moleculed[j][i]):
 					print("Error: Molecule contains mixed dummy and activated beads.\n")
 					sys.exit()

@@ -358,7 +358,7 @@ def splitNucleotides(points, axes, molecules, colors, bonds):
 def quatsToAxes(quats):
 
 	### add time dimension to single frames
-	quats, ndim_add = ars.padDims(quats)
+	quats, ndim_add = ars.padDims(quats,3)
 
 	### initialize
 	nstep = quats.shape[0]

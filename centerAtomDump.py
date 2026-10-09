@@ -21,7 +21,7 @@ def main():
 	### get arguments
 	parser = argparse.ArgumentParser()
 	parser.add_argument('datFile',type=str)
-	parser.add_argument('center',type=str,nargs='?',default='com')
+	parser.add_argument('center',type=getCenterType,nargs='?',default='com')
 	parser.add_argument('unwrap',type=int,nargs='?',default=0)
 	parser.add_argument('setColor',type=int,nargs='?',default=0)
 	parser.add_argument('report',type=int,nargs='?',default=0)
@@ -184,8 +184,8 @@ def centerPointsMolecule(points, molecules, dbox3s, center, unwrap, report, excl
 			com = calcCOM(points[i], dbox3s[i], excludeDummy)
 		elif center == 'com_molecules' or center == 'com_clusters':
 			com = calcCOM(molecule_coms, dbox3s[i], excludeDummy)
-		elif isinteger(center) and int(center) <= nmolecule:
-			com = molecule_coms[int(center)-1]
+		elif isinteger(center) and center <= nmolecule:
+			com = molecule_coms[center-1]
 		else:
 			print("Error: Cannot center points - center must be either 'none', 'com', 'com_molecules', or integer <= nmolecule.\n")
 			sys.exit()
@@ -225,6 +225,11 @@ def calcCOM(r, dbox3, excludeDummy=False):
 ################################################################################
 ### Utility Functions
 
+### interpret center argument (molecule ID or keyword)
+def getCenterType(center):
+	return int(center) if center.isdigit() else center
+
+
 ### apply periodic boundary condition
 def applyPBC(r, dbox):
 	return r - dbox*np.round(r/dbox)
@@ -239,10 +244,10 @@ def sortPointsByMolecule(points, molecules):
 	for m in range(nmolecule):
 		points_moleculed[m] = np.zeros((nstep,sum(molecules==m+1),3))
 	for i in range(nstep):
-		n_molecule_count = np.zeros(nmolecule, dtype=int)
+		nmolecule_count = np.zeros(nmolecule, dtype=int)
 		for j in range(npoint):
-			points_moleculed[molecules[j]-1][i,n_molecule_count[molecules[j]-1]] = points[i,j]
-			n_molecule_count[molecules[j]-1] += 1
+			points_moleculed[molecules[j]-1][i,nmolecule_count[molecules[j]-1]] = points[i,j]
+			nmolecule_count[molecules[j]-1] += 1
 	return points_moleculed
 
 
@@ -257,7 +262,7 @@ def checkAllDummy(r):
 
 
 ### determine if file exists
-def checkFileExist(file, name="the", required=True, requireData=False):
+def checkFileExist(file, name="the", required=True, requireData=False, hush=False):
 	if os.path.isfile(file):
 		if not requireData or os.path.getsize(file):
 			return True
@@ -271,7 +276,8 @@ def checkFileExist(file, name="the", required=True, requireData=False):
 			print(file + "\n")
 			sys.exit()
 		else:
-			print(f"Flag: Could not find {name} file.")
+			if not hush:
+				print(f"Flag: Could not find {name} file.")
 			return False
 
 
@@ -281,16 +287,10 @@ def addSuffix(file, suffix):
 	return base + suffix + ext
 
 
-### test if variable is an integer (python int, numpy int, and string int all count)
+### test if variable is an integer (both python int and numpy int count)
 def isinteger(x):
 	if isinstance(x, int) or isinstance(x, np.int64):
 		return True
-	if isinstance(x, str):
-		try:
-			int(x)
-			return True
-		except ValueError:
-			return False
 	return False
 
 
@@ -307,7 +307,7 @@ def initStatusBar(description, length=30):
 			print("Flag: Status bar description too long.")
 			description = description[:length-6]
 		pad = length - len(description) - 4
-		print(f"\n{'='*(length)}")
+		print(f"{'='*(length)}")
 		print(f"-- {description} {'-'*pad}")
 
 
@@ -317,7 +317,7 @@ def updateStatusBar(i, n, length=30, units='steps'):
 	### dynamic output
 	if sys.stdout.isatty():
 		if i < n-1:
-		 	print(f"\r-- {i+1}/{n} {units}", end='', flush=True)
+			print(f"\r-- {i+1}/{n} {units}", end='', flush=True)
 		else:
 			print(f"\r-- {n}/{n} {units}")
 
@@ -328,7 +328,7 @@ def updateStatusBar(i, n, length=30, units='steps'):
 		nchar_add = nchar_after - nchar_before
 		print("=" * nchar_add, end='', flush=True)
 		if i == n-1:
-			print("\n", flush=True)
+			print(flush=True)
 
 
 ### run the script
