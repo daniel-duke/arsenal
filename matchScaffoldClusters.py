@@ -54,10 +54,10 @@ def main():
 	### check consistency
 	if points_real.shape[0] != nba_total:
 		print("Error: Topology and non-ideal configuration files contain different numbers of bases.\n")
-		sys.exit()
+		sys.exit(1)
 	if points_ideal.shape[0] < nba_scaf:
 		print("Error: Ideal configuration file contains fewer bases than the scaffold.\n")
-		sys.exit()
+		sys.exit(1)
 
 	### read and check clusters
 	clusters = ars.readCluster(args.clusterFile)
@@ -94,11 +94,11 @@ def getScaffoldLength(strands):
 	strand_scaffold = stats.mode(strands).mode
 	if strand_scaffold != strands[0]:
 		print("Error: Scaffold (most common strand) is not the first strand.\n")
-		sys.exit()
+		sys.exit(1)
 	nba_scaf = int(np.sum(strands == strand_scaffold))
 	if not np.all(strands[:nba_scaf] == strand_scaffold):
 		print("Error: Scaffold nucleotides are not contiguous at the start of the topology.\n")
-		sys.exit()
+		sys.exit(1)
 	return nba_scaf
 
 
@@ -111,7 +111,7 @@ def checkClusters(clusters, nba_total, nba_scaf):
 		for bai in clusters[c]:
 			if bai < 0 or bai >= nba_total:
 				print(f"Error: Cluster {c+1} contains base index {bai}, which is outside the origami (0 to {nba_total-1}).\n")
-				sys.exit()
+				sys.exit(1)
 			counts[bai] += 1
 
 	### check memberships
@@ -119,17 +119,17 @@ def checkClusters(clusters, nba_total, nba_scaf):
 	bais_multi = np.flatnonzero(counts > 1)
 	if len(bais_none) > 0:
 		print(f"Error: {len(bais_none)} nucleotides are not in any cluster (first: {bais_none[0]}).\n")
-		sys.exit()
+		sys.exit(1)
 	if len(bais_multi) > 0:
 		print(f"Error: {len(bais_multi)} nucleotides are in multiple clusters (first: {bais_multi[0]}).\n")
-		sys.exit()
+		sys.exit(1)
 
 	### check scaffold counts
 	for c in range(len(clusters)):
 		nscaf = sum(1 for bai in clusters[c] if bai < nba_scaf)
 		if nscaf < 3:
 			print(f"Error: Cluster {c+1} contains only {nscaf} scaffold nucleotides (at least 3 required for alignment).\n")
-			sys.exit()
+			sys.exit(1)
 
 
 ### align each cluster to the ideal scaffold positions

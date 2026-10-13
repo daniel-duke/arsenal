@@ -48,7 +48,7 @@ def main():
 	### error
 	else:
 		print("Error: Unrecognized lattice type.\n")
-		sys.exit()
+		sys.exit(1)
 
 
 ################################################################################
@@ -98,7 +98,7 @@ def guessLattice(cadFile):
 	### error
 	else:
 		print("Error: Cannot guess lattice type, please supply as second argument.")
-		sys.exit()
+		sys.exit(1)
 
 
 ### write topology file

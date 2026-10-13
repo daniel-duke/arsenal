@@ -32,7 +32,7 @@ def main():
 	### check arguments
 	if args.precision > 15:
 		print("Error: Precision should not be greater than 15.")
-		sys.exit()
+		sys.exit(1)
 
 	### read old, write new
 	readWriteOxDNA(args.datFile, args.precision, args.report)
@@ -111,12 +111,12 @@ def checkFileExist(file, name="the", required=True, requireData=False, hush=Fals
 		else:
 			print(f"Error: {name} file has no content:")
 			print(file + "\n")
-			sys.exit()
+			sys.exit(1)
 	else:
 		if required:
 			print(f"Error: Could not find {name} file:")
 			print(file + "\n")
-			sys.exit()
+			sys.exit(1)
 		else:
 			if not hush:
 				print(f"Flag: Could not find {name} file.")

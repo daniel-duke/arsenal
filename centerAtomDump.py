@@ -78,7 +78,7 @@ def readAtomDump(datFile, col_mol, col_color, report):
 				col_x = i-2
 		if col_x is None:
 			print("Error: No position data found.")
-			sys.exit()
+			sys.exit(1)
 
 		### look for next frame
 		steps_per_frame = 0
@@ -174,7 +174,7 @@ def centerPointsMolecule(points, molecules, dbox3s, center, unwrap, report, excl
 					print("Warning: Potential dummy beads detected.")
 				elif not checkAllDummy(points_moleculed[j][i]):
 					print("Error: Molecule contains mixed dummy and activated beads.\n")
-					sys.exit()
+					sys.exit(1)
 			molecule_coms[j] = calcCOM(points_moleculed[j][i], dbox3s[i], excludeDummy)
 
 		### set centering point
@@ -188,7 +188,7 @@ def centerPointsMolecule(points, molecules, dbox3s, center, unwrap, report, excl
 			com = molecule_coms[center-1]
 		else:
 			print("Error: Cannot center points - center must be either 'none', 'com', 'com_molecules', or integer <= nmolecule.\n")
-			sys.exit()
+			sys.exit(1)
 
 		### center the points
 		per_point_coms = molecule_coms[molecules-1]
@@ -269,12 +269,12 @@ def checkFileExist(file, name="the", required=True, requireData=False, hush=Fals
 		else:
 			print(f"Error: {name} file has no content:")
 			print(file + "\n")
-			sys.exit()
+			sys.exit(1)
 	else:
 		if required:
 			print(f"Error: Could not find {name} file:")
 			print(file + "\n")
-			sys.exit()
+			sys.exit(1)
 		else:
 			if not hush:
 				print(f"Flag: Could not find {name} file.")

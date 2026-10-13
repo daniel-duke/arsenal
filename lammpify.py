@@ -63,7 +63,7 @@ def main():
 	### check for conflicting inputs
 	if geoFile is not None and oxFiles is not None:
 		print("Error: Must provide either geometry file or oxDNA files, not both.")
-		sys.exit()
+		sys.exit(1)
 
 	### adjustments for oxDNA simulations
 	if oxFiles is not None:
@@ -191,7 +191,7 @@ def main():
 			colors = bases
 		else:
 			print("Error: Unrecognized coloring.")
-			sys.exit()
+			sys.exit(1)
 
 		### set box diameter
 		if dbox_new is not None:
@@ -219,7 +219,7 @@ def main():
 	### error
 	else:
 		print("Error: Unknown simulation type, try again.")
-		sys.exit()
+		sys.exit(1)
 
 
 ################################################################################
@@ -263,7 +263,7 @@ def convertToNm(units):
 		scale = 0.1
 	else:
 		print("Error: Unrecognized input data units.")
-		sys.exit()
+		sys.exit(1)
 
 	### result
 	return scale
@@ -387,7 +387,7 @@ def getMoleculesFromClustersB0(clusters, npoint):
 			index = clusters[c][j]
 			if index >= npoint:
 				print("Error: requested index " + str(index) + " exceeds the number of beads in the simulation (" + str(npoint) + ").")
-				sys.exit()
+				sys.exit(1)
 			molecules[index] = c+2
 	return molecules
 
@@ -400,7 +400,7 @@ def getMoleculesFromClustersB1(clusters, npoint):
 			index = clusters[c][j]
 			if index > npoint:
 				print("Error: requested index " + str(index) + " exceeds the number of beads in the simulation (" + str(npoint) + ").")
-				sys.exit()
+				sys.exit(1)
 			molecules[index-1] = c+2
 	return molecules
 

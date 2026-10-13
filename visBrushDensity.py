@@ -42,7 +42,7 @@ def main():
 	### check for conflicting inputs
 	if args.noAlign and args.align:
 		print("Error: Cannot rotate the mean structure to its principal components without aligning the frames.")
-		sys.exit()
+		sys.exit(1)
 
 
 ################################################################################

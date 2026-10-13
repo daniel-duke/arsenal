@@ -104,7 +104,7 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 		### check if first line looks like an oxDNA trajectory
 		if header[0][:4] != "t = ":
 			print("Error: First line of trajectory file doesn't match expected (oxDNA) format.\n")
-			sys.exit()
+			sys.exit(1)
 
 		### parse first header
 		step_init = int(header[0].split()[2])
@@ -123,7 +123,7 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 	nstep_trimmed = (nstep_recorded-nstep_skip) // coarse_time
 	if nstep_trimmed <= 0:
 		print("Error: Cannot read oxDNA trajectory - too much initial time cut off.\n")
-		sys.exit()
+		sys.exit(1)
 
 	### determine number of steps to use
 	if isinstance(nstep_max, str) and nstep_max == 'all':
@@ -132,7 +132,7 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 		nstep_use = min([nstep_max,nstep_trimmed])
 	else:
 		print("Error: Cannot read oxDNA trajectory - max number of steps must be 'all' or integer.\n")
-		sys.exit()
+		sys.exit(1)
 
 	### report step counts
 	if not hush: 
@@ -154,7 +154,7 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 			bais[i] = bais[i][::coarse_points]
 	else:
 		print("Error: Cannot read oxDNA trajectory - base indices must be 'all', integer, 1D int array, or 2D int array.\n")
-		sys.exit()
+		sys.exit(1)
 
 	### prepare for backbone bond checking
 	if checkBackbone:
@@ -164,7 +164,7 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 			ntFirstStrand = nba_total
 		elif not ars.isinteger(ntFirstStrand):
 			print("Error: Cannot read oxDNA trajectory - number of nucleotides in first strand must be 'auto' or integer.\n")
-			sys.exit()
+			sys.exit(1)
 
 	### count total number of bases to use
 	nba_use = 0
@@ -202,7 +202,7 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 						line = content[3+bai].split()
 					else:
 						print(f"Error: Cannot read oxDNA trajectory - requested base index {bai} exceeds the number of bases in the simulation ({nba_total}).\n")
-						sys.exit()
+						sys.exit(1)
 
 					### set group
 					if getGroups and si == 0:
@@ -296,7 +296,7 @@ def getNstepOx(datFile, nstep_skip=0, coarse_time=1, hush=False):
 		### check if first line looks like an oxDNA trajectory
 		if header[0][:4] != "t = ":
 			print("Error: First line of trajectory file doesn't match expected (oxDNA) format.\n")
-			sys.exit()
+			sys.exit(1)
 
 		### parse first header
 		step_init = int(header[0].split()[2])
@@ -315,7 +315,7 @@ def getNstepOx(datFile, nstep_skip=0, coarse_time=1, hush=False):
 	nstep_trimmed = (nstep_recorded-nstep_skip) // coarse_time
 	if nstep_trimmed <= 0:
 		print("Error: Cannot read oxDNA trajectory - too much initial time cut off.\n")
-		sys.exit()
+		sys.exit(1)
 
 	### report step counts
 	if not hush:
@@ -372,7 +372,7 @@ def readAtomDump(datFile, nstep_skip=0, coarse_time=1, bdis='all', coarse_points
 		### check if first line looks like a LAMMPS trajectory
 		if header[0][:14] != "ITEM: TIMESTEP":
 			print("Error: First line of trajectory file doesn't match expected (LAMMPS) format.\n")
-			sys.exit()
+			sys.exit(1)
 
 		### parse header
 		step_init = int(header[1].split()[0])
@@ -405,14 +405,14 @@ def readAtomDump(datFile, nstep_skip=0, coarse_time=1, bdis='all', coarse_points
 
 		if col_x is None:
 			print("Error: No position column found.\n")
-			sys.exit()
+			sys.exit(1)
 		if getQuats and col_quat is None:
 			print("Error: No quaternion column found.\n")
-			sys.exit()
+			sys.exit(1)
 		if getExtra:
 			if any(c is None for c in cols_extra):
 				print("Error: Could not find one or more extra item columns.\n")
-				sys.exit()
+				sys.exit(1)
 
 		### look for next frame
 		steps_per_frame = 0
@@ -425,7 +425,7 @@ def readAtomDump(datFile, nstep_skip=0, coarse_time=1, bdis='all', coarse_points
 	nstep_trimmed = (nstep_recorded-nstep_skip-1) // coarse_time + 1
 	if nstep_trimmed <= 0:
 		print("Error: Cannot read atom dump - too much initial time cut off.\n")
-		sys.exit()
+		sys.exit(1)
 
 	### interpret input
 	if isinstance(nstep_max, str) and nstep_max == 'all':
@@ -434,7 +434,7 @@ def readAtomDump(datFile, nstep_skip=0, coarse_time=1, bdis='all', coarse_points
 		nstep_use = min([nstep_max,nstep_trimmed])
 	else:
 		print("Error: Cannot read atom dump - max number of steps must be 'all' or integer.\n")
-		sys.exit()
+		sys.exit(1)
 
 	### report step counts
 	if not hush:
@@ -456,7 +456,7 @@ def readAtomDump(datFile, nstep_skip=0, coarse_time=1, bdis='all', coarse_points
 			bdis[i] = bdis[i][::coarse_points]
 	else:
 		print("Error: Cannot read atom dump - bead indices must be 'all', integer, 1D int array, or 2D int array.\n")
-		sys.exit()
+		sys.exit(1)
 
 	### count total number of beads to use
 	nbd_use = 0
@@ -501,7 +501,7 @@ def readAtomDump(datFile, nstep_skip=0, coarse_time=1, bdis='all', coarse_points
 						line = content[9+bdi-1].split()
 					else:
 						print(f"Error: Cannot read atom dump - requested bead index {bdi} exceeds the number of beads in the simulation ({nbd_total}).\n")
-						sys.exit()
+						sys.exit(1)
 
 					### read descriptors
 					if si == 0:
@@ -568,7 +568,7 @@ def getNstep(datFile, nstep_skip=0, coarse_time=1):
 	nstep_trimmed = (nstep_recorded-nstep_skip-1) // coarse_time + 1
 	if nstep_trimmed <= 0:
 		print("Error: Cannot get number of steps in atom dump - too much initial time cut off.\n")
-		sys.exit()
+		sys.exit(1)
 	return nstep_trimmed
 
 
@@ -615,12 +615,12 @@ def readDump(dumpFile, nstep_skip=0, coarse_time=1, cols='all', nstep_max='all',
 		cols = np.asarray(cols)
 	else:
 		print("Error: Cannot read dump - columns must be 'all', integer, or 1D integer array.\n")
-		sys.exit()
+		sys.exit(1)
 	if isinstance(nstep_max, str) and nstep_max == 'all':
 		nstep_max = 0
 	elif not ars.isinteger(nstep_max):
 		print("Error: Cannot read dump - max number of steps must be 'all' or integer.\n")
-		sys.exit()
+		sys.exit(1)
 
 	### count columns
 	ncol = len(cols)
@@ -701,7 +701,7 @@ def plotThermo(reportFile="report.out", cols=["E_mol","TotEng"]):
 	### process data
 	if not data:
 		print("Error: Could not read thermo file - no data found after header.\n")
-		sys.exit()
+		sys.exit(1)
 	data = np.array(data)
 	data_dict = {col: data[:,i] for i,col in enumerate(header)}
 	for col in cols:
@@ -802,7 +802,7 @@ def readGeo(geoFile, **kwargs):
 			if style == 'mol':
 				if len(line) != 6 and len(line) != 9:
 					print("Error: Incorrect number of columns for atom style molecular.\n")
-					sys.exit()
+					sys.exit(1)
 				molecules[ai] = line[1]
 				types[ai] = line[2]
 				r[ai] = line[3:6]
@@ -811,7 +811,7 @@ def readGeo(geoFile, **kwargs):
 			elif style == 'full':
 				if len(line) != 7 and len(line) != 10:
 					print("Error: Incorrect number of columns of atom style full.\n")
-					sys.exit()
+					sys.exit(1)
 				molecules[ai] = line[1]
 				types[ai] = line[2]
 				r[ai] = line[4:7]
@@ -822,7 +822,7 @@ def readGeo(geoFile, **kwargs):
 			elif style == 'ox':
 				if len(line) != 8 and len(line) != 11:
 					print("Error: Incorrect number of columns of atom style oxDNA.\n")
-					sys.exit()
+					sys.exit(1)
 				types[ai] = line[1]
 				r[ai] = line[2:5]
 				molecules[ai] = line[6]
@@ -830,7 +830,7 @@ def readGeo(geoFile, **kwargs):
 			### throw error
 			else:
 				print("Error: Cannot read geometry - unrecognized atom style.\n")
-				sys.exit()
+				sys.exit(1)
 
 	### get bond information
 	if getBonds and nbond:
@@ -870,7 +870,7 @@ def readGeo(geoFile, **kwargs):
 		### check if extras were found
 		if line_idx == -1:
 			print("Error: extra label not found.\n")
-			sys.exit()
+			sys.exit(1)
 
 		nextra = len(content[line_idx].split())-1
 		extras = np.zeros((natom,nextra))
@@ -1060,7 +1060,7 @@ def unpickle(pklFile, dims=None, hush=False):
 		### make sure pickle array is long enough
 		if len(cucumber) < len(dims):
 			print("Error: pickle array contained fewer elements than expected.\n")
-			sys.exit()
+			sys.exit(1)
 
 		### trim pickle array if too long
 		elif len(cucumber) > len(dims):
@@ -1079,18 +1079,18 @@ def unpickle(pklFile, dims=None, hush=False):
 			elif dims[i] == 0:
 				if not ars.isnumber(cucumber[i]):
 					print(f"Error: Element {i+1} of the pickle array does not match the expected data type (number).\n")
-					sys.exit()
+					sys.exit(1)
 
 			### if not single value, must be array
 			elif not ars.isarray(cucumber[i]):
 				print(f"Error: Element {i+1} of the pickle array does not match the expected data type (array).\n")
-				sys.exit()
+				sys.exit(1)
 
 			### if numpy array, must have correct shape
 			elif isinstance(cucumber[i], np.ndarray):
 				if len(cucumber[i].shape) != dims[i]:
 					print(f"Error: Element {i+1} of the pickle array does not have the expected shape ({dims[i]}).\n")
-					sys.exit()
+					sys.exit(1)
 
 		### remove extra dimension if single value
 		if nvar == 1:
@@ -1141,7 +1141,7 @@ def writeAtomDump(outDatFile, dbox3s, points, col2s='auto', steps_per_frame=1, s
 		dbox3s = np.ones((nstep,3))*dbox3s
 	elif not ars.isarray(dbox3s) or len(dbox3s) != nstep or not ars.isarray(dbox3s[0]) or len(dbox3s[0]) != 3:
 		print("Error: Cannot write atom dump - dbox3s must be number, nstep-element array, or nstep x 3 array.\n")
-		sys.exit()
+		sys.exit(1)
 	if isinstance(col2s, str) and col2s == 'auto':
 		col2s = np.ones(npoint, dtype=int)
 
@@ -1245,10 +1245,10 @@ def writeGeo(geoFile, dbox3, r, molecules='auto', types='auto', bonds=None, angl
 	### check ellipsoid data
 	if radii is not None and quats is None:
 		print("Error: Ellipsoid radii provided without quaternions.\n")
-		sys.exit()
+		sys.exit(1)
 	if radii is None and quats is not None:
 		print("Error: Ellipsoid quaternions provided without radii.\n")
-		sys.exit()
+		sys.exit(1)
 
 	### numpify data
 	r = np.asarray(r)
@@ -2699,7 +2699,7 @@ def calcMSD(points, dbox3=None, dt_per_frame=1, nbin=10, getData=False, getNdim=
 	nstep_bin = int(np.floor(nstep/nbin))
 	if nstep_bin < 2:
 		print("Error: Cannot calculate MSD - too few steps per MSD bin.\n")
-		sys.exit()
+		sys.exit(1)
 	time = np.linspace(0, (nstep_bin-1)*dt_per_frame, nstep_bin)
 	dis2 = np.zeros((nstep_bin, nbin))
 	for q in range(nbin):
@@ -2812,10 +2812,10 @@ def centerPointsMolecule(points, molecules, dbox3s, center=1, unwrap=True, repor
 		dbox3s = np.ones((nstep,3))*dbox3s
 	elif not ars.isarray(dbox3s) or len(dbox3s) != nstep or not ars.isarray(dbox3s[0]) or len(dbox3s[0]) != 3:
 		print("Error: Cannot center points - dbox3s must be number, nstep-element array, or nstep x 3 array.\n")
-		sys.exit()
+		sys.exit(1)
 	if len(molecules) < npoint:
 		print("Error: Cannot center points - molecules must be npoint-element array.\n")
-		sys.exit()
+		sys.exit(1)
 	elif len(molecules) > npoint:
 		print("Warning: Molecules array has too many values, only using the first npoint values.")
 		molecules = molecules[:npoint]
@@ -2838,7 +2838,7 @@ def centerPointsMolecule(points, molecules, dbox3s, center=1, unwrap=True, repor
 					print("Warning: Potential dummy beads detected.")
 				elif not checkAllDummy(points_moleculed[j][i]):
 					print("Error: Molecule contains mixed dummy and activated beads.\n")
-					sys.exit()
+					sys.exit(1)
 			molecule_coms[j] = ars.calcCOM(points_moleculed[j][i], dbox3s[i], excludeDummy)
 
 		### set centering point
@@ -2852,7 +2852,7 @@ def centerPointsMolecule(points, molecules, dbox3s, center=1, unwrap=True, repor
 			com = molecule_coms[center-1]
 		else:
 			print("Error: Cannot center points - center must be either 'none', 'com', 'com_molecules', or integer <= nmolecule.\n")
-			sys.exit()
+			sys.exit(1)
 
 		### center the points
 		per_point_coms = molecule_coms[molecules-1]
@@ -2895,7 +2895,7 @@ def centerPointsBead(points, dbox3s, report=True, excludeDummy=False):
 		dbox3s = np.ones((nstep,3))*dbox3s
 	elif not ars.isarray(dbox3s) or len(dbox3s) != nstep or not ars.isarray(dbox3s[0]) or len(dbox3s[0]) != 3:
 		print("Error: Cannot center points - dbox3s must be number, nstep-element array, or nstep x 3 array.\n")
-		sys.exit()
+		sys.exit(1)
 
 	### center points
 	if report: ars.initStatusBar("Centering")
@@ -2947,7 +2947,7 @@ def calcPMF(OPs_eq, weights, OPs_ts, nbin, bin_padding=0, T=300, tsFold="timeser
 		bin_padding = [bin_padding,bin_padding]
 	elif not ars.isarray(bin_padding) or len(bin_padding) != 2:
 		print("Error: Bin padding must be number or 2-element array.")
-		sys.exit()
+		sys.exit(1)
 
 	### prepare timeseries file names
 	ars.createEmptyFold(tsFold)
@@ -2990,7 +2990,7 @@ def calcPMF(OPs_eq, weights, OPs_ts, nbin, bin_padding=0, T=300, tsFold="timeser
 	if result.returncode != 0:
 		print("WHAM failed, with the following output:\n")
 		print(result.stdout.decode("utf-8"))
-		sys.exit()
+		sys.exit(1)
 
 	### read wham output, return
 	print("WHAM! ...converged.\n")
@@ -3011,14 +3011,14 @@ def calcPMF2D(OP1s_eq, OP2s_eq, w1s, w2s, OP1s_ts, OP2s_ts, nbin, bin_padding=[0
 		nbin = [nbin,nbin]
 	elif not ars.isarray(nbin) or len(nbin) != 2:
 		print("Error: Bin padding must be number or 2-element array.")
-		sys.exit()
+		sys.exit(1)
 	if ars.isnumber(bin_padding):
 		bin_padding = [bin_padding,bin_padding,bin_padding,bin_padding]
 	elif ars.isarray(bin_padding) and len(bin_padding) == 2:
 		bin_padding = [bin_padding[0],bin_padding[0],bin_padding[1],bin_padding[1]]
 	elif not ars.isarray(bin_padding) or len(bin_padding) != 4:
 		print("Error: Bin padding must be number, 2-element array, or 4-element array.")
-		sys.exit()
+		sys.exit(1)
 
 	### prepare timeseries file names
 	ars.createEmptyFold(tsFold)
@@ -3059,7 +3059,7 @@ def calcPMF2D(OP1s_eq, OP2s_eq, w1s, w2s, OP1s_ts, OP2s_ts, nbin, bin_padding=[0
 	if result.returncode != 0:
 		print("WHAM failed, with the following output:\n")
 		print(result.stdout.decode("utf-8"))
-		sys.exit()
+		sys.exit(1)
 
 	### read wham output, return
 	print("WHAM! ...converged.\n")
@@ -3075,7 +3075,7 @@ def calcFreeEnergyFromDist(A, nbin='auto', Alim_bin='auto', T=300, zero='min'):
 		nbin = ars.optbins(A,50)
 	elif not ars.isinteger(nbin):
 		print("Error: Cannot calculate free energy - number of histogram bins must be either 'auto' or integer.\n")
-		sys.exit()
+		sys.exit(1)
 	if isinstance(Alim_bin, str) and Alim_bin == 'auto':
 		Alim_bin = [ min(A), max(A) ]
 		if Alim_bin[0] == Alim_bin[1]:
@@ -3083,10 +3083,10 @@ def calcFreeEnergyFromDist(A, nbin='auto', Alim_bin='auto', T=300, zero='min'):
 			return
 	elif not ars.isarray(Alim_bin) or len(Alim_bin) != 2:
 		print("Error: Cannot calculate free energy - variable limits must be either 'auto' or 2-element array.\n")
-		sys.exit()
+		sys.exit(1)
 	if zero != 'min' and zero != 'max':
 		print("Error: Cannot calculate PMF - zero must be either 'min' or 'max'.\n")
-		sys.exit()
+		sys.exit(1)
 
 	### boltzmann constant in kcal/mol
 	kT = ars.kB_kcal*T
@@ -3114,7 +3114,7 @@ def calcDistFromFreeEnergy(x, F, x0, dx_max, nstep, T=300, rng=np.random, interp
 	### interpret input
 	if interp not in ['linear','step']:
 		print("Error: Unknown interpolation type.\n")
-		sys.exit()
+		sys.exit(1)
 
 	### constants
 	nstep = int(nstep)
@@ -3191,7 +3191,7 @@ def calcMedFromECDF(x, CP):
 	CP_half = np.concatenate(([CP[0]/2],CP_half))
 	if CP_half[0] >= 0.5 or CP_half[-1] <= 0.5:
 		print("Error: Median outside the bounds of cumulative probability range.\n")
-		sys.exit()
+		sys.exit(1)
 	npoint = len(x)
 	for i in range(1,npoint):
 		if CP[i] > 0.5:
@@ -3238,7 +3238,7 @@ def alignPCs(points, indices='all', axis_ranking=[0,1,2], getPCs=False):
 		indices = np.arange(indices)
 	elif not ars.isarray(indices) or not ars.isinteger(indices[0]):
 		print("Error: indices must be 'auto', integer, or int array.\n")
-		sys.exit()
+		sys.exit(1)
 
 	### count
 	nstep = points.shape[0]
@@ -3301,7 +3301,7 @@ def kabschAlgorithm(r_real, r_ideal, indices='all', getR=False):
 		indices = np.arange(indices)
 	elif not ars.isarray(indices) or not ars.isinteger(indices[0]):
 		print("Error: indices must be 'all', integer, or int array.\n")
-		sys.exit()
+		sys.exit(1)
 
 	### enter both sets of points
 	com_real = np.mean(r_real[indices], axis=0)
@@ -3341,7 +3341,7 @@ def calcMeanStructure(points, indices='all', max_iter=100, tol=1e-6):
 		indices = np.arange(indices)
 	elif not ars.isarray(indices) or not ars.isinteger(indices[0]):
 		print("Error: indices must be 'all', integer, or int array.\n")
-		sys.exit()
+		sys.exit(1)
 
 	### initialize reference positions
 	r_ref = points[0].copy()
@@ -3537,7 +3537,7 @@ def fractionalHist(data, bin_edges, alpha=1, limit_left='taper', limit_right='ta
 	### check input
 	if alpha < 1:
 		print("Error: alpha must be >= 1 for fractional histogram.\n")
-		sys.exit()
+		sys.exit(1)
 
 	### metadata
 	centers = (bin_edges[:-1] + bin_edges[1:]) / 2
@@ -3563,7 +3563,7 @@ def fractionalHist(data, bin_edges, alpha=1, limit_left='taper', limit_right='ta
 				counts[0] += 1.0
 			else:
 				print("Error: Unknown left end type, must be taper, cut, or extend.\n")
-				sys.exit()
+				sys.exit(1)
 			continue
 
 		# right limit
@@ -3581,7 +3581,7 @@ def fractionalHist(data, bin_edges, alpha=1, limit_left='taper', limit_right='ta
 				counts[-1] += 1.0
 			else:
 				print("Error: Unknown right end type, must be taper, cut, or extend.\n")
-				sys.exit()
+				sys.exit(1)
 			continue
 
 		### regular bins
@@ -3645,7 +3645,7 @@ def calcCorrTime(A, hush=False):
 	### check for unconverged correlation
 	if tau == None:
 		print("Error: Correlation time estimate did not converge.\n")
-		sys.exit()
+		sys.exit(1)
 
 	### check for uncorrelated data
 	if tau < 1:
@@ -3816,7 +3816,7 @@ def calcNormStats(A, weights=None):
 def factorial(n):
 	if not ars.isinteger(n):
 		print("Error: Cannot calculate factorial of float.\n")
-		sys.exit()
+		sys.exit(1)
 	return np.prod(np.arange(1,n+1))
 
 
@@ -3849,7 +3849,7 @@ def getColor(color,scaled=False):
 	### unrecognized
 	else:
 		print("Error: Unknown color.\n")
-		sys.exit()
+		sys.exit(1)
 
 	### fractional
 	if scaled:
@@ -3875,7 +3875,7 @@ def getCmap(name):
 
 	### error
 	print("Error: Cound not find colormap or color.\n")
-	sys.exit()
+	sys.exit(1)
 
 
 ### get softened version of color
@@ -4002,12 +4002,12 @@ def checkFileExist(file, name="the", required=True, requireData=False, hush=Fals
 		else:
 			print(f"Error: {name} file has no content:")
 			print(file + "\n")
-			sys.exit()
+			sys.exit(1)
 	else:
 		if required:
 			print(f"Error: Could not find {name} file:")
 			print(file + "\n")
-			sys.exit()
+			sys.exit(1)
 		else:
 			if not hush:
 				print(f"Flag: Could not find {name} file.")
@@ -4058,7 +4058,7 @@ def compressArr(A):
 def clipNorm(x, a, b):
 	if b <= a:
 		print("Error: Upper clip limit must be greater than lower clip limit.\n")
-		sys.exit()
+		sys.exit(1)
 	return np.clip((x - a) / (b - a), 0, 1)
 
 

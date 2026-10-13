@@ -39,7 +39,7 @@ def main():
 	### check consistency
 	if points.shape[1] != nba_total:
 		print("Error: Topology and configuration files contain different numbers of bases.\n")
-		sys.exit()
+		sys.exit(1)
 
 	### put scaffold first
 	order, strands_new, bases_new, n3s_new, n5s_new = putScaffoldFirst(strands, bases, n3s, n5s)
