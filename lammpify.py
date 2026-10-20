@@ -36,7 +36,7 @@ def main():
 	parser.add_argument('--nstep-skip',		type=int, default=0, 		help="number of recorded initial steps to skip")
 	parser.add_argument('--coarse-time',	type=int, default=1, 		help="coarse factor for time steps")
 	parser.add_argument('--center',			action='store_true',		help="whether to center the trajectory")
-	parser.add_argument('--align',			action='store_true',		help="whether to align principal components with coordinate axes (first frame only)")
+	parser.add_argument('--align',			action='store_true',		help="whether to align principal components with coordinate axes")
 	parser.add_argument('--split',			action='store_true',		help="whether split oxDNA particles into backbone and base beads")
 	parser.add_argument('--style',			type=str, default='mol', 	help="for lammps simulations, atom style in geometry file (mol, full, ox)")
 	parser.add_argument('--units',			type=str, default='nm', 	help="for lammps simuations, length scale of input data (nm, ang, ox)")
@@ -146,14 +146,15 @@ def main():
 
 			### split and write geometry
 			axes_init = quatsToAxes(quats_init)
-			if align: axes_init = axes_init @ PCs
-			points_init, quats_init, molecules, colors, radii, bonds = splitNucleotides(points_init, axes_init, molecules, colors, bonds)
+			if align: axes_init = axes_init @ PCs_init
+			points_init, quats_init, radii, bonds, [molecules, colors] = ars.splitNucleotides(points_init, axes_init, bonds, [molecules, colors])
 			ars.writeGeo(outGeoFile, dbox3, points_init, molecules, colors, bonds, radii=radii, quats=quats_init)
 
 			### split and write trajectory
 			if datFile is not None:
 				axes = quatsToAxes(quats)
-				points, quats = splitNucleotides(points, axes, molecules, colors, bonds)[:2]
+				if align: axes = axes @ PCs[:,None]
+				points, quats = ars.splitNucleotides(points, axes, bonds)[:2]
 				ars.writeAtomDump(outDatFile, dbox3s, points, colors, quats=quats)
 
 	### lammpify oxdna
@@ -209,7 +210,7 @@ def main():
 		else:
 
 			### split data
-			points, quats, strands, colors, radii, bonds = splitNucleotides(points, axes, strands, colors, bonds)
+			points, quats, radii, bonds, [strands, colors] = ars.splitNucleotides(points, axes, bonds, [strands, colors])
 
 			### write output
 			ars.writeGeo(outGeoFile, dbox3, points[0], strands, colors, bonds, radii=radii, quats=quats[0])
@@ -305,53 +306,6 @@ def readForce(forceFile):
 
 	### result
 	return clusters
-
-
-### split particles into backbone and base sites, adding appropriate bonds
-def splitNucleotides(points, axes, molecules, colors, bonds):
-
-	### add time dimension to single frames
-	points, ndim_add = ars.padDims(points,3)
-	axes = ars.padDims(axes,4)[0]
-
-	### counts
-	nstep = points.shape[0]
-	npoint = points.shape[1]
-
-	### initialize
-	points_split = np.zeros((nstep,npoint*2,3))
-	quats = np.zeros((nstep,npoint*2,4))
-	quats[:,:,0] = 1
-
-	### split position data
-	points_split[:,:npoint] = points + ars.ox2nm*(-0.34*axes[:,:,0] + 0.3408*axes[:,:,1])
-	points_split[:,npoint:] = points + ars.ox2nm*(0.4*axes[:,:,0])
-
-	### calculate orientation data
-	ars.initStatusBar("Calculating quaternions")
-	for i in range(nstep):
-		for j in range(npoint):
-			quats[i,npoint+j] = ars.axesToQuat(axes[i,j])
-		ars.updateStatusBar(i,nstep)
-
-	### add base to backbone bonds
-	for j in range(npoint):
-		bonds = np.append(bonds,[[2,j+1,npoint+j+1]], axis=0)
-
-	### identification data
-	molecules = np.concatenate((molecules,molecules))
-	colors = np.concatenate((colors,colors))
-
-	### bead sizes
-	radii = np.full((npoint*2,3), 0.34)
-	radii[npoint:,2] = 0.17
-
-	### add time dimension to single frames
-	points_split = ars.trimDims(points_split, ndim_add)
-	quats = ars.trimDims(quats, ndim_add)
-
-	### results
-	return points_split, quats, molecules, colors, radii, bonds
 
 
 ### wrapper function for converting quaternion trajectory to coordinate axes trajectory

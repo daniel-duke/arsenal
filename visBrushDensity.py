@@ -9,8 +9,16 @@ import sys
   # brushes and computes a 3D density map of where the brush nucleotides go
   # over the course of the trajectory.
 # the cluster file contains the base indices for the brushes (one cluster per
-  # brush), with the the core structure assumed to comprise of all the non-brush
-  # base indices.
+  # brush); all of the remaining base indices make up the core.
+# every frame is aligned to the mean structure, as controlled by three options:
+  # --fit gives the nucleotides that the rotation is fit to (core, all, or
+  # brushes), --axis restricts the rotation (free, none, or about a single
+  # axis), and --pivot gives the point the rotation is about (by default the
+  # center of mass of the fit nucleotides, which also aligns translation; or a
+  # fixed point, e.g. for a structure that is pinned in place). a group of
+  # nucleotides only has to exist if the alignment actually uses it, so there is
+  # no need for a core when there is no rotation (--axis 0) about a fixed point
+  # (--pivot 0).
 # the density grid(s) are written as Gaussian cube files, which can be rendered
   # in ovito using the Create Isosurface modifier.
 # the reference structure is written separately as a LAMMPS-style geometry file,
@@ -33,16 +41,18 @@ def main():
 	parser.add_argument('--voxel',			type=float, default=0.5,	help="grid spacing, in nm")
 	parser.add_argument('--padding',		type=float, default=2.0,	help="padding around the brush bounding box, in nm")
 	parser.add_argument('--sigma',			type=float, default=0.5,	help="Gaussian smoothing width, in nm (0 to disable)")
+	parser.add_argument('--fit',			type=str, default='core', choices=['core','all','brushes'], help="nucleotides that the rotation is fit to when aligning the frames")
+	parser.add_argument('--axis',			type=str, nargs='+', default=None, help="rotation allowed when aligning the frames: leave out for free rotation, 0 for no rotation, 1/2/3 to only rotate about x/y/z, or three numbers to only rotate about that axis")
+	parser.add_argument('--pivot',			type=str, nargs='+', default=None, help="what the frames are rotated about when aligned: com-core, com-all, or com-brushes rotate about the center of mass of that group and align translation using it; a number (0 for the origin) or three numbers X Y Z (in nm) rotate about that point and apply no translation (e.g. a pinned particle); by default the center of mass of the fit nucleotides")
+	parser.add_argument('--alignToBox',		action='store_true',		help="rotate the output (for visualization only) so the principal components of the fit nucleotides' mean structure line up with the box axes")
 	parser.add_argument('--noSplit',		action='store_true',		help="plot nucleotides as single bead at COM")
-	parser.add_argument('--align',			action='store_true',		help="rotate mean structure to align its principal components with the box")
-	parser.add_argument('--noAlign',		action='store_true',		help="do not align the frames (e.g. if the structure is pinned in the box); frames are used as they are")
 	parser.add_argument('--writeOvito',		action='store_true',		help="write an ovito scene file")
 	args = parser.parse_args()
 
-	### check for conflicting inputs
-	if args.noAlign and args.align:
-		print("Error: Cannot rotate the mean structure to its principal components without aligning the frames.")
-		sys.exit(1)
+	### interpret the alignment options
+	axis = None if args.axis is None else getArgType(args.axis)
+	pivot = f"com-{args.fit}" if args.pivot is None else getArgType(args.pivot)
+	if ars.isnumber(pivot): pivot = np.full(3, float(pivot))
 
 
 ################################################################################
@@ -53,96 +63,49 @@ def main():
 	outGeoFile = outFold + "geometry.in"
 	outOvitoFile = outFold + "brushes.ovito"
 
-	### create output folder
-	ars.createEmptyFold(outFold)
-
 	### read topology and cluster definitions
 	strands, bonds, nba_total = readTop(args.topFile)
 	clusters = ars.readCluster(args.clusterFile)
-	bais_brush = combineClusters(clusters)
-	bais_all = np.arange(nba_total)
-	bais_core = np.setdiff1d(bais_all, bais_brush)
-	nbrush = len(clusters)
 
-	### read trajectory, fixing periodic boundary breaks (and centering, unless frames are not being aligned)
+	### identify the groups of nucleotides, and the ones the alignment uses
+	groups = getGroups(clusters, nba_total)
+	bais_fit, bais_pivot = getAlignmentGroups(groups, args.fit, axis, pivot, args.alignToBox)
+	bais_brush = groups['brushes']
+
+	### read trajectory, fixing periodic boundary breaks (and centering, unless the alignment pivots about a fixed point)
 	points, dbox3, axes = ars.readOxDNA(args.datFile, args.nstep_skip, args.coarse_time, getDbox3=True, getAxes=True)
-	points = ars.centerPointsMolecule(points, strands, dbox3, center='none' if args.noAlign else 'com', unwrap=True)
-	nstep = points.shape[0]
+	points = ars.centerPointsMolecule(points, strands, dbox3, center='none' if bais_pivot is None else 'com', unwrap=True)
 
-	### use the raw frames and their plain average structure
-	if args.noAlign:
-		points_aligned = points
-		r_ref = np.mean(points, axis=0)
-		a1_sum = np.sum(axes[:,:,0], axis=0)
-		a3_sum = np.sum(axes[:,:,2], axis=0)
+	### align every frame to the mean structure
+	points, pivot = setPivot(points, bais_pivot, pivot)
+	points_aligned, r_ref, axes_ref = alignFrames(points, axes, bais_fit, axis, pivot)
 
-	### align every frame to the mean structure of the core
-	else:
-		r_ref = ars.calcMeanStructure(points, bais_core)
-		if args.align: r_ref = ars.alignPCs(r_ref, bais_core)
+	### for visualization, rotate everything so the principal components of the fit nucleotides' mean structure line up with the box
+	if args.alignToBox:
+		pivot_box = np.mean(r_ref[bais_fit], axis=0)
+		r_ref, PCs = ars.alignPCs(r_ref, bais_fit, getPCs=True)
+		points_aligned = (points_aligned - pivot_box) @ PCs + pivot_box
+		axes_ref = axes_ref @ PCs
 
-		### calculate mean structure
-		ars.initStatusBar("Aligning")
-		points_aligned = np.zeros((nstep,nba_total,3))
-		a1_sum = np.zeros((nba_total,3))
-		a3_sum = np.zeros((nba_total,3))
-		for i in range(nstep):
-			points_aligned[i], R = ars.kabschAlgorithm(points[i], r_ref, indices=bais_core, getR=True)
-			a1_sum += axes[i,:,0] @ R
-			a3_sum += axes[i,:,2] @ R
-			ars.updateStatusBar(i,nstep)
-
-	### renormalize the averaged orientations
-	a1_ref = a1_sum / np.linalg.norm(a1_sum, axis=1, keepdims=True)
-	a3_ref = a3_sum / np.linalg.norm(a3_sum, axis=1, keepdims=True)
-	a2_ref = np.cross(a3_ref, a1_ref)
-	a2_ref /= np.linalg.norm(a2_ref, axis=1, keepdims=True)
-	axes_ref = np.stack([a1_ref, a2_ref, a3_ref], axis=1)
-
-	### assign colors from cluster identity
+	### assign colors from cluster identity (1 for the core, 2, 3, ... for each brush)
 	colors = np.ones(nba_total, dtype=int)
 	for c,cluster in enumerate(clusters):
 		colors[np.array(cluster)] = c+2
 
-	### write the reference structure: the core's mean shape, with backbone bonds
+	### create output folder (only now, so that a bad input does not wipe the previous results)
+	ars.createEmptyFold(outFold)
+
+	### write the reference structure: the mean shape, with backbone bonds
 	if args.noSplit:
 		ars.writeGeo(outGeoFile, dbox3, r_ref, strands, colors, bonds)
 
 	else:
 		### write geometry
-		r_ref, quats_ref, colors, radii, bonds = splitNucleotides(r_ref, axes_ref, colors, bonds)
+		r_ref, quats_ref, radii, bonds, [colors] = ars.splitNucleotides(r_ref, axes_ref, bonds, [colors])
 		ars.writeGeo(outGeoFile, dbox3, r_ref, types=colors, bonds=bonds, radii=radii, quats=quats_ref)
 
-	### cube updates
-	ars.initStatusBar("Writing cubes")
-
-	### pool brush positions across all frames and determine grid
-	points_brush = points_aligned[:,bais_brush].reshape(-1,3)
-
-	### determine grid
-	edges = calcGridEdges(points_brush, args.voxel, args.padding)
-
-	### calculate density grid
-	grid, origin = calcDensityGrid(points_brush, nstep, edges, args.voxel, args.sigma)
-
-	### write cube file
-	outCubeFile = outFold + "brushes.cube"
-	writeCube(outCubeFile, grid, origin, np.full(3,args.voxel))
-	ars.updateStatusBar(0,nbrush+1,units="brushes")
-
-	### repeat for each brush individually
-	outCubeFiles = []
-	for c,cluster in enumerate(clusters):
-		bais_brush = np.array(sorted(set(cluster)))
-
-		### pool brushes, calculate grid
-		points_brush = points_aligned[:,bais_brush].reshape(-1,3)
-		grid, origin = calcDensityGrid(points_brush, nstep, edges, args.voxel, args.sigma)
-
-		### write cube file
-		outCubeFiles.append(outFold + f"brush{c+1}.cube")
-		writeCube(outCubeFiles[c], grid, origin, np.full(3,args.voxel))
-		ars.updateStatusBar(c+1,nbrush+1,units="brushes")
+	### write the density grids
+	outCubeFiles = writeDensities(outFold, points_aligned, bais_brush, clusters, args.voxel, args.padding, args.sigma)
 
 	### write ovito scene
 	if args.writeOvito:
@@ -214,6 +177,33 @@ def writeCube(cubeFile, grid, origin, spacing):
 				for k in range(0,nz,6):
 					chunk = line_vals[k:k+6]
 					f.write(" ".join(f"{v:13.5e}" for v in chunk) + "\n")
+
+
+### write the density grid of all the brushes together, then of each brush individually, all on the same grid
+def writeDensities(outFold, points_aligned, bais_brush, clusters, voxel, padding, sigma):
+	nstep = points_aligned.shape[0]
+	nbrush = len(clusters)
+	ars.initStatusBar("Writing cubes")
+
+	### pool brush positions across all frames and determine the grid
+	points_brush = points_aligned[:,bais_brush].reshape(-1,3)
+	edges = calcGridEdges(points_brush, voxel, padding)
+
+	### all brushes together
+	grid, origin = calcDensityGrid(points_brush, nstep, edges, voxel, sigma)
+	writeCube(outFold + "brushes.cube", grid, origin, np.full(3,voxel))
+	ars.updateStatusBar(0,nbrush+1,units="brushes")
+
+	### each brush individually
+	outCubeFiles = []
+	for c,cluster in enumerate(clusters):
+		points_brush = points_aligned[:,combineClusters([cluster])].reshape(-1,3)
+		grid, origin = calcDensityGrid(points_brush, nstep, edges, voxel, sigma)
+		outCubeFiles.append(outFold + f"brush{c+1}.cube")
+		writeCube(outCubeFiles[c], grid, origin, np.full(3,voxel))
+		ars.updateStatusBar(c+1,nbrush+1,units="brushes")
+
+	return outCubeFiles
 
 
 ### build an ovito scene with all pipelies already configured
@@ -293,45 +283,95 @@ def calcDensityGrid(points, nstep, edges, voxel, sigma):
 	return grid, origin
 
 
+### align every frame to the mean structure, averaging the orientations along the way
+def alignFrames(points, axes, bais_fit, axis, pivot):
+	nstep, nba_total = points.shape[:2]
+
+	### calculate the mean structure, then align every frame to it
+	r_ref = ars.calcMeanStructure(points, bais_fit, axis=axis, pivot=pivot)
+	ars.initStatusBar("Aligning")
+	points_aligned = np.zeros((nstep,nba_total,3))
+	a1_sum = np.zeros((nba_total,3))
+	a3_sum = np.zeros((nba_total,3))
+	for i in range(nstep):
+		points_aligned[i], R = ars.kabschAlgorithm(points[i], r_ref, indices=bais_fit, getR=True, axis=axis, pivot=pivot)
+		a1_sum += axes[i,:,0] @ R
+		a3_sum += axes[i,:,2] @ R
+		ars.updateStatusBar(i,nstep)
+
+	### renormalize the averaged orientations
+	a1_ref = a1_sum / np.linalg.norm(a1_sum, axis=1, keepdims=True)
+	a3_ref = a3_sum / np.linalg.norm(a3_sum, axis=1, keepdims=True)
+	a2_ref = np.cross(a3_ref, a1_ref)
+	a2_ref /= np.linalg.norm(a2_ref, axis=1, keepdims=True)
+	axes_ref = np.stack([a1_ref, a2_ref, a3_ref], axis=1)
+
+	### results
+	return points_aligned, r_ref, axes_ref
+
+
 ################################################################################
 ### Utility Functions
+
+### interpret a command line argument given as a keyword, a number, or a list of numbers
+def getArgType(arg):
+	arg = [ int(a) if a.isdigit() else float(a) if ars.isnumber(a) else a for a in arg ]
+	return arg[0] if len(arg) == 1 else arg
+
+
+### identify the groups of nucleotides (as lists of base indices): the brushes are all the clusters, and the core is everything else
+def getGroups(clusters, nba_total):
+	if len(clusters) == 0:
+		print("Error: No brush clusters found in the cluster file.")
+		sys.exit(1)
+	bais_all = np.arange(nba_total)
+	bais_brush = combineClusters(clusters)
+	return { 'core'		: np.setdiff1d(bais_all, bais_brush),
+			 'all'		: bais_all,
+			 'brushes'	: bais_brush }
+
+
+### get the groups of nucleotides that the alignment uses, checking that they exist when they are needed:
+  # the fit group is needed to fit the rotation (or to find the principal components for aligning to
+  # the box), and the pivot group is needed when the pivot is the center of mass of a group
+def getAlignmentGroups(groups, fit, axis, pivot, alignToBox):
+
+	### fit group (the rotation is not fit if there is no rotation, so anything can stand in)
+	bais_fit = groups['all']
+	noRotation = ars.isnumber(axis) and float(axis) == 0
+	if not noRotation or alignToBox:
+		bais_fit = groups[fit]
+		if len(bais_fit) == 0:
+			print(f"Error: There are no {fit} nucleotides, which are needed to fit the alignment; choose another group with --fit, or avoid fitting with --axis 0 (and no --alignToBox).")
+			sys.exit(1)
+
+	### pivot group (none if the pivot is a fixed point)
+	bais_pivot = None
+	if isinstance(pivot, str):
+		if not pivot.startswith('com-') or pivot[4:] not in groups:
+			print("Error: Unrecognized pivot, keywords are " + ", ".join("com-"+g for g in groups) + ".")
+			sys.exit(1)
+		bais_pivot = groups[pivot[4:]]
+		if len(bais_pivot) == 0:
+			print(f"Error: There are no {pivot[4:]} nucleotides, which are needed to find the pivot; choose another group or a fixed point with --pivot.")
+			sys.exit(1)
+
+	### results
+	return bais_fit, bais_pivot
+
+
+### if the pivot is the center of mass of a group, put that at the origin in every frame and pivot about the origin
+  # (this aligns translation along with rotation)
+def setPivot(points, bais_pivot, pivot):
+	if bais_pivot is None:
+		return points, pivot
+	return points - np.mean(points[:,bais_pivot], axis=1, keepdims=True), np.zeros(3)
+
 
 ### get a single list of all base indices included in a list of clusters
 def combineClusters(clusters):
 	indices = { i for cluster in clusters for i in cluster }
 	return np.array(sorted(set(indices)))
-
-
-### split particles into backbone and base sites, adding appropriate bonds
-def splitNucleotides(r, axes, colors, bonds):
-	npoint = r.shape[0]
-
-	### initialize
-	r_split = np.zeros((npoint*2,3))
-	quats = np.zeros((npoint*2,4))
-	quats[:,0] = 1
-
-	### split position data
-	r_split[:npoint] = r + ars.ox2nm*(-0.34*axes[:,0] + 0.3408*axes[:,1])
-	r_split[npoint:] = r + ars.ox2nm*(0.4*axes[:,0])
-
-	### calculate orientation data
-	for j in range(npoint):
-		quats[npoint+j] = ars.axesToQuat(axes[j])
-
-	### add base to backbone bonds
-	for j in range(npoint):
-		bonds = np.append(bonds,[[2,j+1,npoint+j+1]], axis=0)
-
-	### identification data
-	colors = np.concatenate((colors,colors))
-
-	### bead sizes
-	radii = np.full((npoint*2,3), 0.34)
-	radii[npoint:,2] = 0.17
-
-	### results
-	return r_split, quats, colors, radii, bonds
 
 
 ### run the script

@@ -20,10 +20,6 @@ import os
 
 def main():
 
-	### command line input
-	datFile = sys.argv[1]
-	coarse_time = int(sys.argv[2])
-
 	### get arguments
 	parser = argparse.ArgumentParser()
 	parser.add_argument('datFile',type=str)
@@ -53,6 +49,9 @@ def readWriteAtomDump(datFile, coarse_time, report):
 		nbd_total = int(line.split()[0])
 
 		for i in range(nbd_total+7): line = f.readline()
+		if not line:
+			print("Error: Trajectory needs at least two frames.\n")
+			sys.exit(1)
 		steps_per_frame = int(line.split()[0]) - step_init
 
 	### count lines

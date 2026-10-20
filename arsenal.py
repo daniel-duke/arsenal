@@ -32,8 +32,8 @@ import ast
 # molecules - npoint-element numpy array containing the molecule index for each point (starting from 1)
 # col2s - npoint-element numpy array containing atomDump second column data for each point
 # dbox - float, periodic box diameter
-# dbox3 - 3-element array, periodic box diameter in each coordinate direction
-# dbox3s - nstep x 3 array, periodic box diameter in each coordinate direction at each time step
+# dbox3 - 3-element numpy array, periodic box diameter in each coordinate direction
+# dbox3s - nstep x 3 numpy array, periodic box diameter in each coordinate direction at each time step
 
 
 ################################################################################
@@ -68,6 +68,7 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 	checkBackbone 		= False 	if 'checkBackbone' not in kwargs else kwargs['checkBackbone']
 	ntFirstStrand 		= 'auto'	if 'ntFirstStrand' not in kwargs else kwargs['ntFirstStrand']
 	useHbondSite 		= False		if 'useHbondSite' not in kwargs else kwargs['useHbondSite']
+	useHelixCenter 		= False		if 'useHelixCenter' not in kwargs else kwargs['useHelixCenter']
 	ignorePBC 			= False		if 'ignorePBC' not in kwargs else kwargs['ignorePBC']
 	getAxes				= False		if 'getAxes' not in kwargs else kwargs['getAxes']
 	getDbox3 			= False		if 'getDbox3' not in kwargs else kwargs['getDbox3']
@@ -209,18 +210,20 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 						groups[pi] = g + 1
 
 					### read values
-					com = np.array(line[:3],dtype=float)
-					if useHbondSite or getAxes:
-						a1 = np.array(line[3:6],dtype=float)
+					com = np.array(line[:3], dtype=float)
+					if useHbondSite or useHelixCenter or getAxes:
+						a1 = np.array(line[3:6], dtype=float)
 					if getAxes:
-						a3 = np.array(line[6:9],dtype=float)
+						a3 = np.array(line[6:9], dtype=float)
 						a2 = np.cross(a3,a1)
 
 					### store values
-					if not useHbondSite:
-						points[si,pi] = com
-					else:
+					if useHbondSite:
 						points[si,pi] = com + 0.4*a1
+					elif useHelixCenter:
+						points[si,pi] = com + 0.6*a1
+					else:
+						points[si,pi] = com
 					if getAxes:
 						axes[si,pi] = [a1,a2,a3]
 
@@ -236,12 +239,12 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 				for bai in range(ntFirstStrand-1):
 					line0 = content[3+bai+0].split()
 					line1 = content[3+bai+1].split()
-					com_bai0 = np.array(line0[:3],dtype=float)
-					com_bai1 = np.array(line1[:3],dtype=float)
-					a1_bai0  = np.array(line0[3:6],dtype=float)
-					a1_bai1  = np.array(line1[3:6],dtype=float)
-					a3_bai0  = np.array(line0[6:9],dtype=float)
-					a3_bai1  = np.array(line1[6:9],dtype=float)
+					com_bai0 = np.array(line0[:3], dtype=float)
+					com_bai1 = np.array(line1[:3], dtype=float)
+					a1_bai0  = np.array(line0[3:6], dtype=float)
+					a1_bai1  = np.array(line1[3:6], dtype=float)
+					a3_bai0  = np.array(line0[6:9], dtype=float)
+					a3_bai1  = np.array(line1[6:9], dtype=float)
 					a2_bai0 = np.cross(a3_bai0, a1_bai0)
 					a2_bai1 = np.cross(a3_bai1, a1_bai1)
 					bb_bai0 = com_bai0 - 0.34*a1_bai0 + 0.3408*a2_bai0
@@ -300,7 +303,7 @@ def getNstepOx(datFile, nstep_skip=0, coarse_time=1, hush=False):
 
 		### parse first header
 		step_init = int(header[0].split()[2])
-		dbox3 = np.array(header[1].split()[2:5],dtype=float)
+		dbox3 = np.array(header[1].split()[2:5], dtype=float)
 
 		### look for next frame
 		steps_per_frame = 0
@@ -512,13 +515,13 @@ def readAtomDump(datFile, nstep_skip=0, coarse_time=1, bdis='all', coarse_points
 								extras[pi,k] = line[cols_extra[k]]
 
 					### read positions
-					points[si,pi] = np.array(line[col_x:col_x+3],dtype=float)
+					points[si,pi] = np.array(line[col_x:col_x+3], dtype=float)
 					if isScaled:
 						points[si,pi] = (points[si,pi]-1/2)*dbox3s[si]
 
 					### read orientations
 					if getQuats:
-						quats[si,pi] = np.array(line[col_quat:col_quat+4],dtype=float)
+						quats[si,pi] = np.array(line[col_quat:col_quat+4], dtype=float)
 
 					### read extra data
 					if getExtra and not staticExtra:
@@ -702,7 +705,7 @@ def plotThermo(reportFile="report.out", cols=["E_mol","TotEng"]):
 	if not data:
 		print("Error: Could not read thermo file - no data found after header.\n")
 		sys.exit(1)
-	data = np.array(data)
+	data = np.asarray(data)
 	data_dict = {col: data[:,i] for i,col in enumerate(header)}
 	for col in cols:
 		if col not in data_dict:
@@ -825,7 +828,7 @@ def readGeo(geoFile, **kwargs):
 					sys.exit(1)
 				types[ai] = line[1]
 				r[ai] = line[2:5]
-				molecules[ai] = line[6]
+				molecules[ai] = line[5]
 
 			### throw error
 			else:
@@ -892,9 +895,9 @@ def readGeo(geoFile, **kwargs):
 				break
 		for i in range(natom):
 			line = content[line_idx].split()
-			radii[i,0] = line[1]
-			radii[i,1] = line[2]
-			radii[i,2] = line[3]
+			radii[i,0] = float(line[1])/2
+			radii[i,1] = float(line[2])/2
+			radii[i,2] = float(line[3])/2
 			quats[i,0] = line[4]
 			quats[i,1] = line[5]
 			quats[i,2] = line[6]
@@ -1250,6 +1253,10 @@ def writeGeo(geoFile, dbox3, r, molecules='auto', types='auto', bonds=None, angl
 		print("Error: Ellipsoid quaternions provided without radii.\n")
 		sys.exit(1)
 
+	### ellipsoid shape is written as diameters
+	if radii is not None:
+		diams = 2*np.asarray(radii)
+
 	### numpify data
 	r = np.asarray(r)
 	molecules = np.asarray(molecules)
@@ -1311,11 +1318,11 @@ def writeGeo(geoFile, dbox3, r, molecules='auto', types='auto', bonds=None, angl
 	if x_precision > 0:
 		len_x += 1+x_precision
 
-	### determine space for ellipsoid radii
+	### determine space for ellipsoid diameters
 	if radii is not None:
 		len_r = [None]*3
 		for i in range(3):
-			len_r[i] = len(str(int(max(radii[:,i]))))
+			len_r[i] = len(str(int(max(diams[:,i]))))
 			if x_precision > 0:
 				len_r[i] += 1+x_precision
 
@@ -1388,9 +1395,9 @@ def writeGeo(geoFile, dbox3, r, molecules='auto', types='auto', bonds=None, angl
 			f.write("\nEllipsoids\n\n")
 			for i in range(natom):
 				f.write(f"\t{i+1:<{len_natom}} " + \
-						f"{radii[i,0]:>{len_r[0]}.{x_precision}f} " + \
-						f"{radii[i,1]:>{len_r[1]}.{x_precision}f} " + \
-						f"{radii[i,2]:>{len_r[2]}.{x_precision}f} " + \
+						f"{diams[i,0]:>{len_r[0]}.{x_precision}f} " + \
+						f"{diams[i,1]:>{len_r[1]}.{x_precision}f} " + \
+						f"{diams[i,2]:>{len_r[2]}.{x_precision}f} " + \
 						f"{quats[i,0]:>11.8f} " + \
 						f"{quats[i,1]:>11.8f} " + \
 						f"{quats[i,2]:>11.8f} " + \
@@ -3286,7 +3293,7 @@ def alignPCs(points, indices='all', axis_ranking=[0,1,2], getPCs=False):
 
 
 ### rigidly superimpose points onto a reference structure (Kabsch algorithm)
-def kabschAlgorithm(r_real, r_ideal, indices='all', getR=False):
+def kabschAlgorithm(r_real, r_ideal, indices='all', getR=False, pivot='com', axis=None):
 
 	### notes
 	# this version of the Kabsch algorithm matches the wikipedia version, which
@@ -3294,7 +3301,7 @@ def kabschAlgorithm(r_real, r_ideal, indices='all', getR=False):
 	  # perform the linera algebra with column-vector notation, and others mix them
 	  # and produce incorrect results; but rest assured this one is correct.
 
-	### interpret input
+	### interpret indices
 	if isinstance(indices, str) and indices == 'all':
 		indices = np.arange(len(r_real))
 	elif ars.isinteger(indices):
@@ -3303,26 +3310,70 @@ def kabschAlgorithm(r_real, r_ideal, indices='all', getR=False):
 		print("Error: indices must be 'all', integer, or int array.\n")
 		sys.exit(1)
 
-	### enter both sets of points
-	com_real = np.mean(r_real[indices], axis=0)
-	r_real_centered = r_real - com_real
-	com_ideal = np.mean(r_ideal[indices], axis=0)
-	r_ideal_centered = r_ideal - com_ideal
+	### interpret pivot
+	if isinstance(pivot, str) and pivot == 'com':
+		pivot_real = np.mean(r_real[indices], axis=0)
+		pivot_ideal = np.mean(r_ideal[indices], axis=0)
+	elif ars.isarray(pivot) and ars.isnumber(pivot[0]) and len(pivot) == 3:
+		pivot_real = pivot_ideal = np.asarray(pivot, dtype=float)
+	else:
+		print("Error: pivot must be 'com' or a 3-element array.\n")
+		sys.exit(1)
 
-	### covariance and SVD
-	H = r_real_centered[indices].T @ r_ideal_centered[indices]
-	U, S, Vt = np.linalg.svd(H)
+	### interpret axis
+	noRotation = False
+	if axis is not None:
+		if ars.isnumber(axis) and float(axis) == 0:
+			noRotation = True
+		elif ars.isnumber(axis) and float(axis) in (1,2,3):
+			axis = np.eye(3)[int(float(axis))-1]
+		elif ars.isarray(axis) and ars.isnumber(axis[0]) and len(axis) == 3:
+			axis = ars.unitVector(np.asarray(axis))
+		else:
+			print("Error: axis must be None, 0, 1, 2, 3, or a 3-element array.\n")
+			sys.exit(1)
 
-	### enforce right-handedness
-	if np.linalg.det(U@Vt) < 0:
-		U[:,-1] *= -1
+	### center both sets of points
+	r_real_centered = r_real - pivot_real
+	r_ideal_centered = r_ideal - pivot_ideal
 
-	### calculate rotation
-	R = U @ Vt
+	### no rotation
+	if noRotation:
+		R = np.eye(3)
 
-	### rotate positions, add ideal center
+	### free rotation: covariance and SVD
+	elif axis is None:
+		H = r_real_centered[indices].T @ r_ideal_centered[indices]
+		U, S, Vt = np.linalg.svd(H)
+
+		### enforce right-handedness
+		if np.linalg.det(U@Vt) < 0:
+			U[:,-1] *= -1
+
+		### rotation matrix
+		R = U @ Vt
+
+	### rotation about axis: Rodrigues' formula
+	else:
+
+		### variables
+		x = r_real_centered[indices]
+		y = r_ideal_centered[indices]
+
+		### rotation angle
+		a = np.sum(x*y) - np.sum((x@axis)*(y@axis))
+		b = axis @ np.sum(np.cross(x,y), axis=0)
+		theta = np.arctan2(b, a)
+
+		### axis cross-product matrix
+		K = np.array([[0,-axis[2],axis[1]], [axis[2],0,-axis[0]], [-axis[1],axis[0],0]])
+
+		### rotation matrix
+		R = (np.eye(3) + np.sin(theta)*K + (1-np.cos(theta))*(K@K)).T
+
+	### rotate positions, add ideal pivot
 	r_real_rot = r_real_centered @ R
-	r_real_aligned = r_real_rot + com_ideal
+	r_real_aligned = r_real_rot + pivot_ideal
 
 	### results
 	output = [ r_real_aligned ]
@@ -3332,7 +3383,7 @@ def kabschAlgorithm(r_real, r_ideal, indices='all', getR=False):
 
 
 ### calculate mean structure of trajectory
-def calcMeanStructure(points, indices='all', max_iter=100, tol=1e-6):
+def calcMeanStructure(points, indices='all', max_iter=100, tol=1e-6, pivot='com', axis=None):
 
 	### interpret input
 	if isinstance(indices, str) and indices == 'all':
@@ -3352,10 +3403,7 @@ def calcMeanStructure(points, indices='all', max_iter=100, tol=1e-6):
 
 		### loop over frames
 		for i, r_frame in enumerate(points):
-			R = ars.kabschAlgorithm(r_frame, r_ref, indices=indices, getR=True)[1]
-			com_frame = np.mean(r_frame[indices], axis=0)
-			com_ref = np.mean(r_ref[indices], axis=0)
-			points_aligned[i] = (r_frame - com_frame) @ R + com_ref
+			points_aligned[i] = ars.kabschAlgorithm(r_frame, r_ref, indices=indices, pivot=pivot, axis=axis)
 
 		### check for convergence
 		r_mean = np.mean(points_aligned, axis=0)
@@ -3423,6 +3471,61 @@ def axesToQuat(a):
 
 	### result
 	return q
+
+
+### split particles into backbone and base sites, adding appropriate bonds
+def splitNucleotides(points, axes, bonds, props=None):
+
+	### notes
+	# works with single frames (npoint x 3) or trajectories (nstep x npoint x 3).
+	# backbone sites are listed first, followed by base sites.
+	# props is a list of npoint-element per-particle arrays (molecules, colors,
+	  # etc.), each of which is duplicated so that it matches the split particles.
+
+	### add time dimension to single frames
+	points, ndim_add = ars.padDims(points,3)
+	axes = ars.padDims(axes,4)[0]
+
+	### counts
+	nstep = points.shape[0]
+	npoint = points.shape[1]
+
+	### initialize
+	points_split = np.zeros((nstep,npoint*2,3))
+	quats = np.zeros((nstep,npoint*2,4))
+	quats[:,:,0] = 1
+
+	### split position data
+	points_split[:,:npoint] = points + ars.ox2nm*(-0.34*axes[:,:,0] + 0.3408*axes[:,:,1])
+	points_split[:,npoint:] = points + ars.ox2nm*(0.4*axes[:,:,0])
+
+	### calculate orientation data
+	ars.initStatusBar("Calculating quaternions")
+	for i in range(nstep):
+		for j in range(npoint):
+			quats[i,npoint+j] = ars.axesToQuat(axes[i,j])
+		ars.updateStatusBar(i,nstep)
+
+	### add base to backbone bonds
+	for j in range(npoint):
+		bonds = np.append(bonds,[[2,j+1,npoint+j+1]], axis=0)
+
+	### per-particle properties
+	if props is not None:
+		props = [ np.concatenate((prop,prop)) for prop in props ]
+
+	### bead sizes
+	radii = np.full((npoint*2,3), 0.34/2)
+	radii[npoint:,2] = 0.17/2
+
+	### add time dimension to single frames
+	points_split = ars.trimDims(points_split, ndim_add)
+	quats = ars.trimDims(quats, ndim_add)
+
+	### results
+	output = [ points_split, quats, radii, bonds ]
+	if props is not None: output.append(props)
+	return output
 
 
 ### calculate hydrogen bond energy between two nucleotides
