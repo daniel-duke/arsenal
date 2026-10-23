@@ -164,6 +164,10 @@ def parseStrands(j, strand_type):
 	topology = []
 	occupancy = [ [ [] for j in range(nbox_vstrand) ] for i in range(nvstrand) ]
 
+	### map vstrand number to index
+	vnum2vi = { vstrand["num"]: vi for vi, vstrand in enumerate(j["vstrands"]) }
+	vnum2vi[-1] = -1
+
 	### loop over vstrands
 	for vi in range(nvstrand):
 		vstrand = j["vstrands"][vi]
@@ -187,7 +191,7 @@ def parseStrands(j, strand_type):
 			vi_curr = vi
 			bi_curr = bi
 			while True:
-				vi_next = j["vstrands"][vi_curr][strand_type][bi_curr][0]
+				vi_next = vnum2vi[j["vstrands"][vi_curr][strand_type][bi_curr][0]]
 				bi_next = j["vstrands"][vi_curr][strand_type][bi_curr][1]
 
 				### found 5p end
@@ -241,7 +245,7 @@ def parseStrands(j, strand_type):
 						topology.append([si_curr,ni_curr-1,ni_curr+1])
 
 				### peek at next nucleotide
-				vi_next = j["vstrands"][vi_curr][strand_type][bi_curr][2]
+				vi_next = vnum2vi[j["vstrands"][vi_curr][strand_type][bi_curr][2]]
 				bi_next = j["vstrands"][vi_curr][strand_type][bi_curr][3]
 
 				### found 3p end

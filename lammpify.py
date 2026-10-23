@@ -106,6 +106,8 @@ def main():
 		scale = convertToNm(units)
 		points_init *= scale
 		dbox3 *= scale
+		if style == 'ox':
+			radii *= scale
 		if datFile is not None:
 			points *= scale
 			dbox3s *= scale
@@ -147,14 +149,14 @@ def main():
 			### split and write geometry
 			axes_init = quatsToAxes(quats_init)
 			if align: axes_init = axes_init @ PCs_init
-			points_init, quats_init, radii, bonds, [molecules, colors] = ars.splitNucleotides(points_init, axes_init, bonds, [molecules, colors])
-			ars.writeGeo(outGeoFile, dbox3, points_init, molecules, colors, bonds, radii=radii, quats=quats_init)
+			points_init, quats_init, radii_split, bonds, [molecules, colors] = ars.splitNucleotides(points_init, axes_init, bonds, [molecules, colors], types=types, radii_other=radii)
+			ars.writeGeo(outGeoFile, dbox3, points_init, molecules, colors, bonds, radii=radii_split, quats=quats_init)
 
 			### split and write trajectory
 			if datFile is not None:
 				axes = quatsToAxes(quats)
 				if align: axes = axes @ PCs[:,None]
-				points, quats = ars.splitNucleotides(points, axes, bonds)[:2]
+				points, quats = ars.splitNucleotides(points, axes, bonds, types=types, radii_other=radii)[:2]
 				ars.writeAtomDump(outDatFile, dbox3s, points, colors, quats=quats)
 
 	### lammpify oxdna

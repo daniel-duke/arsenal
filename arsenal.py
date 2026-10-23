@@ -748,6 +748,7 @@ def readGeo(geoFile, **kwargs):
 	natom = -1
 	nbond = -1
 	nangle = -1
+	nellipsoid = -1
 	for i in range(len(content)):
 		if len(content[i].split()) == 2:
 			if content[i].split()[1] == 'atoms':
@@ -756,7 +757,9 @@ def readGeo(geoFile, **kwargs):
 				nbond = int(content[i].split()[0])
 			if content[i].split()[1] == 'angles':
 				nangle = int(content[i].split()[0])
-		if natom != -1 and nbond != -1 and nangle != -1:
+			if content[i].split()[1] == 'ellipsoids':
+				nellipsoid = int(content[i].split()[0])
+		if natom != -1 and nbond != -1 and nangle != -1 and (style != 'ox' or nellipsoid != -1):
 			break
 		if i == len(content)-1:
 			if natom == -1:
@@ -765,6 +768,13 @@ def readGeo(geoFile, **kwargs):
 				nbond = 0
 			if nangle == -1:
 				nangle = 0
+			if nellipsoid == -1:
+				nellipsoid = 0
+
+	### check ellipsoid count
+	if style == 'ox' and nellipsoid != natom:
+		print("Error: Number of ellipsoids (" + str(nellipsoid) + ") does not match number of atoms (" + str(natom) + ").\n")
+		sys.exit(1)
 
 	### get box diameter
 	dbox3 = np.zeros(3)
@@ -895,13 +905,14 @@ def readGeo(geoFile, **kwargs):
 				break
 		for i in range(natom):
 			line = content[line_idx].split()
-			radii[i,0] = float(line[1])/2
-			radii[i,1] = float(line[2])/2
-			radii[i,2] = float(line[3])/2
-			quats[i,0] = line[4]
-			quats[i,1] = line[5]
-			quats[i,2] = line[6]
-			quats[i,3] = line[7]
+			ai = int(line[0])-1
+			radii[ai,0] = float(line[1])/2
+			radii[ai,1] = float(line[2])/2
+			radii[ai,2] = float(line[3])/2
+			quats[ai,0] = line[4]
+			quats[ai,1] = line[5]
+			quats[ai,2] = line[6]
+			quats[ai,3] = line[7]
 			line_idx += 1
 
 	### results
@@ -3474,13 +3485,17 @@ def axesToQuat(a):
 
 
 ### split particles into backbone and base sites, adding appropriate bonds
-def splitNucleotides(points, axes, bonds, props=None):
+def splitNucleotides(points, axes, bonds, props=None, types=None, radii_other=None):
 
 	### notes
 	# works with single frames (npoint x 3) or trajectories (nstep x npoint x 3).
-	# backbone sites are listed first, followed by base sites.
+	# each particle keeps its original index (nucleotides become backbone sites),
+	  # and base sites are appended afterwards, in the same order as the nucleotides.
+	# if types is given, only particles of types 1-4 are treated as nucleotides;
+	  # all other particles are left in place with their original orientation and
+	  # radii_other (npoint x 3, nm) as their size.
 	# props is a list of npoint-element per-particle arrays (molecules, colors,
-	  # etc.), each of which is duplicated so that it matches the split particles.
+	  # etc.), each of which is extended so that it matches the split particles.
 
 	### add time dimension to single frames
 	points, ndim_add = ars.padDims(points,3)
@@ -3490,33 +3505,50 @@ def splitNucleotides(points, axes, bonds, props=None):
 	nstep = points.shape[0]
 	npoint = points.shape[1]
 
+	### identify nucleotides
+	if types is None:
+		isNt = np.ones(npoint, dtype=bool)
+	else:
+		isNt = (np.asarray(types) >= 1) & (np.asarray(types) <= 4)
+	nts = np.where(isNt)[0]
+	others = np.where(~isNt)[0]
+	nnt = len(nts)
+	if len(others) and radii_other is None:
+		print("Error: Radii required for non-nucleotide particles.\n")
+		sys.exit(1)
+
 	### initialize
-	points_split = np.zeros((nstep,npoint*2,3))
-	quats = np.zeros((nstep,npoint*2,4))
+	points_split = np.zeros((nstep,npoint+nnt,3))
+	quats = np.zeros((nstep,npoint+nnt,4))
 	quats[:,:,0] = 1
 
 	### split position data
-	points_split[:,:npoint] = points + ars.ox2nm*(-0.34*axes[:,:,0] + 0.3408*axes[:,:,1])
-	points_split[:,npoint:] = points + ars.ox2nm*(0.4*axes[:,:,0])
+	points_split[:,others] = points[:,others]
+	points_split[:,nts] = points[:,nts] + ars.ox2nm*(-0.34*axes[:,nts,0] + 0.3408*axes[:,nts,1])
+	points_split[:,npoint:] = points[:,nts] + ars.ox2nm*(0.4*axes[:,nts,0])
 
 	### calculate orientation data
 	ars.initStatusBar("Calculating quaternions")
 	for i in range(nstep):
-		for j in range(npoint):
-			quats[i,npoint+j] = ars.axesToQuat(axes[i,j])
+		for k,j in enumerate(nts):
+			quats[i,npoint+k] = ars.axesToQuat(axes[i,j])
+		for j in others:
+			quats[i,j] = ars.axesToQuat(axes[i,j])
 		ars.updateStatusBar(i,nstep)
 
 	### add base to backbone bonds
-	for j in range(npoint):
-		bonds = np.append(bonds,[[2,j+1,npoint+j+1]], axis=0)
+	bondType = int(max(bonds[:,0]))+1 if len(bonds) else 2
+	for k,j in enumerate(nts):
+		bonds = np.append(bonds,[[bondType,j+1,npoint+k+1]], axis=0)
 
 	### per-particle properties
 	if props is not None:
-		props = [ np.concatenate((prop,prop)) for prop in props ]
+		props = [ np.concatenate((prop,np.asarray(prop)[nts])) for prop in props ]
 
 	### bead sizes
-	radii = np.full((npoint*2,3), 0.34/2)
+	radii = np.full((npoint+nnt,3), 0.34/2)
 	radii[npoint:,2] = 0.17/2
+	if len(others): radii[others] = np.asarray(radii_other)[others]
 
 	### add time dimension to single frames
 	points_split = ars.trimDims(points_split, ndim_add)
