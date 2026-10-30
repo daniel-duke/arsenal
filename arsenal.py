@@ -9,6 +9,7 @@ from scipy.stats import gaussian_kde
 from scipy.stats import norm
 from scipy.stats import lognorm
 from scipy.special import gammaln
+from scipy.special import logsumexp
 from scipy.interpolate import interp1d
 from scipy.ndimage import gaussian_filter1d
 import subprocess
@@ -151,8 +152,7 @@ def readOxDNA(datFile, nstep_skip=0, coarse_time=1, bais='all', coarse_points=1,
 		bais = [bais[::coarse_points]]
 	elif ars.isarray(bais) and ars.isarray(bais[0]) and ars.isinteger(bais[0][0]):
 		getGroups = True
-		for i in range(len(bais)):
-			bais[i] = bais[i][::coarse_points]
+		bais = [bais[i][::coarse_points] for i in range(len(bais))]
 	else:
 		print("Error: Cannot read oxDNA trajectory - base indices must be 'all', integer, 1D int array, or 2D int array.\n")
 		sys.exit(1)
@@ -455,8 +455,7 @@ def readAtomDump(datFile, nstep_skip=0, coarse_time=1, bdis='all', coarse_points
 		bdis = [bdis[::coarse_points]]
 	elif ars.isarray(bdis) and ars.isarray(bdis[0]) and ars.isinteger(bdis[0][0]):
 		getGroups = True
-		for i in range(len(bdis)):
-			bdis[i] = bdis[i][::coarse_points]
+		bdis = [bdis[i][::coarse_points] for i in range(len(bdis))]
 	else:
 		print("Error: Cannot read atom dump - bead indices must be 'all', integer, 1D int array, or 2D int array.\n")
 		sys.exit(1)
@@ -732,7 +731,7 @@ def readGeo(geoFile, **kwargs):
 	getDbox3	= False	if 'getDbox3' not in kwargs else kwargs['getDbox3']
 	getCharges	= False	if 'getCharges' not in kwargs else kwargs['getCharges']
 	getBonds	= False if 'getBonds' not in kwargs else kwargs['getBonds']
-	getAngles	= False if 'getAngles' not in kwargs else kwargs['getAnlges']
+	getAngles	= False if 'getAngles' not in kwargs else kwargs['getAngles']
 
 	### notes
 	# all indices are stored directly as they appear in the geometry file; in
@@ -1637,6 +1636,7 @@ def magicPlot(pubReady=False, useTex=False, **kwargs):
 	font		= None		if 'font' not in kwargs else kwargs['font']
 	pad_x		= ars.pdx	if 'pad_x' not in kwargs else kwargs['pad_x']
 	pad_y		= ars.pdy	if 'pad_y' not in kwargs else kwargs['pad_y']
+	size		= None		if 'size' not in kwargs else kwargs['size']
 	
 	### determine font size
 	if not pubReady:
@@ -1652,7 +1652,8 @@ def magicPlot(pubReady=False, useTex=False, **kwargs):
 			font = 'Times'
 
 	### calculate size
-	size = 8+pad_x, 6+pad_y
+	if size is None:
+		size = 8+pad_x, 6+pad_y
 
 	### set default magic settings
 	params = {
@@ -1694,6 +1695,8 @@ def initFig(figLabel='auto', Xlabel=None, Ylabel=None, Xlim=None, Ylim=None, tit
 	shift_y			= ars.shy	if 'shift_y' not in kwargs else kwargs['shift_y']
 	scale_x			= ars.scx	if 'scale_x' not in kwargs else kwargs['scale_x']
 	scale_y			= ars.scy	if 'scale_y' not in kwargs else kwargs['scale_y']
+	xticks			= None		if 'xticks' not in kwargs else kwargs['xticks']
+	yticks			= None		if 'yticks' not in kwargs else kwargs['yticks']
 	boxAsIs			= False		if 'boxAsIs' not in kwargs else kwargs['boxAsIs']
 
 	### initialize figure
@@ -1732,12 +1735,23 @@ def initFig(figLabel='auto', Xlabel=None, Ylabel=None, Xlim=None, Ylim=None, tit
 		ax.set_ylabel(Ylabel)
 	if title is not None:
 		ax.set_title(title)
+	if xticks is not None:
+		ax.set_xticks(xticks)
+	if yticks is not None:
+		ax.set_yticks(yticks)
 
 	### results
 	output = [ fig ]
 	if getAx: output.append(ax)
 	if len(output) == 1: output = output[0]
 	return output
+
+
+### set current figure to given label, get axes
+def getFigAx(figLabel):
+	fig = plt.figure(figLabel)
+	ax = fig.axes[0]
+	return fig, ax
 
 
 ### plot the convergence of a varaible
@@ -2192,10 +2206,11 @@ def plotHist(A, figLabel='auto', Alabel=None, nbin='auto', Alim_bin='auto', Alim
 
 	### clean data
 	A = np.asarray(A, dtype=float)
-	A = A[~np.isnan(A)]
+	valid = ~np.isnan(A)
+	A = A[valid]
 	if weights is not None:
 		weights = np.asarray(weights, dtype=float)
-		weights = weights[~np.isnan(A)]
+		weights = weights[valid]
 	N = len(A)
 
 	### determine whether plotting raw data
@@ -2652,10 +2667,10 @@ def plotUS(OPs_eq, weights, OPs_ts, OPs_wham, PMF, PMF_err, nbin='auto', OPlabel
 
 	### adjust to oxDNA units (assuming nm and kcal)
 	if useOxUnits:
-		OPs_eq *= nm2ox
-		weights *= kcal2ox
-		OPs_ts = [x*nm2ox for x in OPs_ts]
-		OPs_wham *= nm2ox
+		OPs_eq = np.asarray(OPs_eq)*nm2ox
+		weights = np.asarray(weights)*kcal2ox
+		OPs_ts = [np.asarray(x)*nm2ox for x in OPs_ts]
+		OPs_wham = np.asarray(OPs_wham)*nm2ox
 
 	### prepare labels
 	titleHist = "US Histograms"
@@ -3085,6 +3100,111 @@ def calcPMF2D(OP1s_eq, OP2s_eq, w1s, w2s, OP1s_ts, OP2s_ts, nbin, bin_padding=[0
 	return OP1s_wham, OP2s_wham, PMF
 
 
+### calculate unbiased frame weights from umbrella sampling (binless wham, aka mbar)
+def calcWeightsUS(OPs_eq, weights, OPs_ts, T=300, f_init=None, getFreeEnergies=False, tol=1E-8, maxiter=100000):
+
+	### notes
+	# the weights need to be in kcal/mol*{op unit}^2, with bias 0.5*weight*(OP-OP_eq)^2 (same as wham).
+	# the bias depends only on the OP, so the frame weights unbias any quantity measured on the same frames.
+	# the frame weights are returned per simulation, and they sum to 1 over all simulations.
+	# the simulation free energies (in kT) can be returned to warm start later calls.
+
+	### setup
+	kT = ars.kB_kcal*T
+	nsim = len(OPs_eq)
+	N = np.array([len(x) for x in OPs_ts])
+	OPs = np.concatenate(OPs_ts)
+	U = 0.5*np.asarray(weights)[None,:]*(OPs[:,None]-np.asarray(OPs_eq)[None,:])**2/kT
+	f = np.zeros(nsim) if f_init is None else np.array(f_init, dtype=float)
+
+	### convex objective (minimum gives simulation free energies)
+	def objective(f):
+		logD = logsumexp(np.log(N)[None,:] + f[None,:] - U, axis=1)
+		return np.sum(logD) - np.dot(N, f), logD
+
+	### newton iteration, with backtracking
+	g, logD = objective(f)
+	converged = False
+	for it in range(maxiter):
+		P = np.exp(np.log(N)[None,:] + f[None,:] - U - logD[:,None])
+		grad = P.sum(0) - N
+		hess = np.diag(P.sum(0)) - P.T @ P
+		df = np.zeros(nsim)
+		df[1:] = -np.linalg.solve(hess[1:,1:], grad[1:])
+		step = 1
+		while True:
+			g_new, logD_new = objective(f + step*df)
+			if g_new <= g or step < 1E-8:
+				break
+			step /= 2
+		f += step*df
+		g, logD = g_new, logD_new
+		if np.max(abs(step*df)) < tol:
+			converged = True
+			break
+	if not converged:
+		print("Warning: Frame weight calculation did not converge.\n")
+
+	### normalize, split by simulation
+	logw = -logsumexp(np.log(N)[None,:] + f[None,:] - U, axis=1)
+	wts = np.exp(logw - logsumexp(logw))
+	wts = np.split(wts, np.cumsum(N)[:-1])
+	if getFreeEnergies:
+		return wts, f
+	return wts
+
+
+### calculate free energy of any quantity from umbrella sampling (by reweighting frames)
+def calcFreeEnergyUS(OPs_eq, weights, OPs_ts, As_ts, bin_width, T=300, nboot=100, rng=np.random):
+
+	### notes
+	# the quantity of interest (As_ts) must have the same shape as the OP timeseries (OPs_ts).
+	# the bins span the full range of the quantity, aligned to multiples of the bin width.
+	# error bars come from block bootstrapping each simulation, with block length set by the OP correlation time.
+	# the output free energies are in kcal/mol, with the minimum set to zero.
+
+	### setup
+	kT = ars.kB_kcal*T
+	nsim = len(OPs_eq)
+	A_all = np.concatenate(As_ts)
+	bin_min = np.floor(min(A_all)/bin_width)*bin_width
+	bin_max = np.ceil(max(A_all)/bin_width)*bin_width
+	bin_edges = np.arange(bin_min, bin_max+bin_width/2, bin_width)
+	bins = (bin_edges[1:]+bin_edges[:-1])/2
+
+	### free energy from weighted histogram
+	def calcF(As, wts):
+		h = np.histogram(As, bin_edges, weights=wts)[0]
+		F = np.full(len(bins), np.nan)
+		F[h>0] = -kT*np.log(h[h>0])
+		return F - np.nanmin(F)
+
+	### calculate free energy
+	wts, f = calcWeightsUS(OPs_eq, weights, OPs_ts, T, getFreeEnergies=True)
+	F = calcF(A_all, np.concatenate(wts))
+
+	### block bootstrap error bars
+	print("Bootstrapping free energy...")
+	block_lens = [ int(np.ceil(1+2*ars.calcCorrTime(OPs_ts[i], hush=True))) for i in range(nsim) ]
+	F_boot = np.zeros((nboot, len(bins)))
+	for b in range(nboot):
+		OPs_boot = [None]*nsim
+		As_boot = [None]*nsim
+		for i in range(nsim):
+			n = len(OPs_ts[i])
+			L = block_lens[i]
+			starts = (rng.random(int(np.ceil(n/L)))*(n-L+1)).astype(int)
+			idx = (starts[:,None] + np.arange(L)[None,:]).ravel()[:n]
+			OPs_boot[i] = np.asarray(OPs_ts[i])[idx]
+			As_boot[i] = np.asarray(As_ts[i])[idx]
+		wts_boot = calcWeightsUS(OPs_eq, weights, OPs_boot, T, f_init=f)
+		F_boot[b] = calcF(np.concatenate(As_boot), np.concatenate(wts_boot))
+	F_err = np.nanstd(F_boot, axis=0)
+
+	### results
+	return bins, F, F_err
+
+
 ### invert histogram to get free energy landscape
 def calcFreeEnergyFromDist(A, nbin='auto', Alim_bin='auto', T=300, zero='min'):
 
@@ -3128,6 +3248,11 @@ def calcFreeEnergyFromDist(A, nbin='auto', Alim_bin='auto', T=300, zero='min'):
 
 ### use MC to explore free energy landscape
 def calcDistFromFreeEnergy(x, F, x0, dx_max, nstep, T=300, rng=np.random, interp='linear'):
+
+	### order by x array
+	order = np.argsort(x)
+	x = x[order]
+	F = F[order]
 
 	### interpret input
 	if interp not in ['linear','step']:
@@ -3189,7 +3314,8 @@ def calcECDF(A):
 ### calculate cumulative probability from given free energy (assuming stepwise interpolation)
 def calcECDFfromFreeEnergy(F, T=300):
 	kT = ars.kB_kcal*T
-	F -= np.nanmin(F)
+	F = np.asarray(F, dtype=float)
+	F = F - np.nanmin(F)
 	p = np.exp(-F/kT)
 	p[0] /= 2
 	p[-1] /= 2
@@ -3203,19 +3329,25 @@ def calcECDFfromFreeEnergy(F, T=300):
 	return CP
 
 
-### calculate median from where cumulative probability passes 50% (assuming stepwise interpolation)
-def calcMedFromECDF(x, CP):
-	CP_half = (CP[1:]+CP[:-1])/2
-	CP_half = np.concatenate(([CP[0]/2],CP_half))
-	if CP_half[0] >= 0.5 or CP_half[-1] <= 0.5:
-		print("Error: Median outside the bounds of cumulative probability range.\n")
-		sys.exit(1)
-	npoint = len(x)
-	for i in range(1,npoint):
-		if CP[i] > 0.5:
-			frac = (0.5-CP_half[i-1])/(CP_half[i]-CP_half[i-1])
-			x_med = x[i-1] + frac*(x[i]-x[i-1])
-			return x_med
+### calculate median (and optionally quartiles) from cumulative probability (assuming stepwise interpolation)
+def calcMedFromECDF(x, CP, getQuartiles=False):
+	x = np.asarray(x, dtype=float)
+	CP = np.asarray(CP, dtype=float)
+	p = np.diff(np.concatenate(([0],CP)))
+	has_p = p > 0
+	x_knots = []
+	CP_knots = []
+	for i in np.where(has_p)[0]:
+		left_open = i > 0 and has_p[i-1]
+		right_open = i < len(x)-1 and has_p[i+1]
+		x_knots += [ (x[i-1]+x[i])/2 if left_open else x[i], (x[i]+x[i+1])/2 if right_open else x[i] ]
+		CP_knots += [ CP[i]-p[i], CP[i] ]
+	x_med = np.interp(0.5, CP_knots, x_knots)
+	if not getQuartiles:
+		return x_med
+	x_q1 = np.interp(0.25, CP_knots, x_knots)
+	x_q3 = np.interp(0.75, CP_knots, x_knots)
+	return x_med, x_q1, x_q3
 
 
 ### calculate mean (boltzmann-weighted) from free energy (assuming linearly-spaced x)
@@ -4018,6 +4150,15 @@ def soften(color, alpha):
 	rgb = np.array(mcolors.to_rgb(color))
 	rgb_soft = alpha * rgb + (1 - alpha)
 	return tuple(rgb_soft)
+
+
+### determine test color (black or white) from background luminescence
+def getTextColor(color, threshold=0.5):
+	lum =  0.299*color[0] + 0.587*color[1] + 0.114*color[2]
+	if lum > threshold:
+		return 'black'
+	else:
+		return 'white'
 
 
 ### print status bar header

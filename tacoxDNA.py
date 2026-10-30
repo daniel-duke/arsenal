@@ -13,6 +13,11 @@ import sys
 pitch = 0.332
 d_com_axis = 0.6*ars.ox2nm
 
+### lammps oxDNA constants (oxDNA units)
+mass_nt = 3.1575
+diam_nt = 1.173984503142341
+base_types = {'A':1, 'C':2, 'G':3, 'T':4}
+
 ### start
 def main():
 
@@ -22,6 +27,7 @@ def main():
 	parser.add_argument('lattice',type=str,nargs='?',default=None)
 	parser.add_argument('--seed',type=int,default=42)
 	parser.add_argument('--center',action='store_true')
+	parser.add_argument('--lammps',action='store_true')
 	args = parser.parse_args()
 
 	### determine lattice
@@ -67,14 +73,23 @@ def main():
 	### flip strands
 	seq, r, axes = flipPrimeDir(topology, seq, r, axes)
 
-	### write topology
-	topFile = ars.changeExtension(args.cadFile, "top")
-	writeTop(topFile, topology, seq)
+	### write lammps geometry
+	if args.lammps:
+		print("Writing geometry...")
+		geoFile = ars.changeExtension(args.cadFile, "in")
+		writeLammps(geoFile, topology, seq, r, axes, dbox)
 
-	### write configuration
-	print("Writing configuration...")
-	datFile = ars.changeExtension(args.cadFile, "dat")
-	ars.writeOxDNA(datFile, r, axes, dbox)
+	### write oxDNA files
+	else:
+
+		### write topology
+		topFile = ars.changeExtension(args.cadFile, "top")
+		writeTop(topFile, topology, seq)
+
+		### write configuration
+		print("Writing configuration...")
+		datFile = ars.changeExtension(args.cadFile, "dat")
+		ars.writeOxDNA(datFile, r, axes, dbox)
 
 
 ################################################################################
@@ -112,6 +127,30 @@ def writeTop(topFile, topology, seq):
 			f.write(f"{topology[i][0]+1} {seq[i]} {topology[i][1]} {topology[i][2]}\n")
 
 
+### write lammps geometry file
+def writeLammps(geoFile, topology, seq, r, axes, dbox):
+
+	### notes
+	# expects flipped data, so that bonds connect nucleotides i and i+1, where
+	  # the topology entries are the oxDNA 3' and 5' neighbors, respectively.
+
+	### count
+	nba_total = len(topology)
+
+	### set per-nucleotide properties
+	molecules = np.array([ nt[0]+1 for nt in topology ])
+	types = np.array([ base_types[s] for s in seq ])
+	quats = np.array([ ars.axesToQuat(a) for a in axes ])
+	quats = np.round(quats, 8) + 0.0
+	radii = np.full((nba_total,3), diam_nt/2)
+
+	### set bonds (to 5' neighbor, so each bond is only listed once)
+	bonds = np.array([ [1,i+1,topology[i][2]+1] for i in range(nba_total) if topology[i][2] >= 0 ])
+
+	### write file
+	ars.writeGeo(geoFile, dbox, r, molecules, types, bonds, natomType=4, masses=[mass_nt]*4, radii=radii, quats=quats, x_precision=8)
+
+
 ### extract necessary info from caDNAno file
 def parseCaDNAno(cadFile):
 	print("Parsing caDNAno file...")
@@ -128,6 +167,11 @@ def parseCaDNAno(cadFile):
 	### get topology and the nucleotide(s) in each box
 	topology_scaf, occupancy_scaf = parseStrands(j, "scaf")
 	topology_stap, occupancy_stap = parseStrands(j, "stap")
+
+	### check that scaffold exists
+	if not topology_scaf:
+		print("Error: Found no scaffold.")
+		sys.exit()
 
 	### set scaffold sequence
 	nnt_scaf = len(topology_scaf)
@@ -248,6 +292,11 @@ def parseStrands(j, strand_type):
 				vi_next = vnum2vi[j["vstrands"][vi_curr][strand_type][bi_curr][2]]
 				bi_next = j["vstrands"][vi_curr][strand_type][bi_curr][3]
 
+				### check for strand with all bases skipped
+				if start and (vi_next == -1 or (vi_next == vi_start and bi_next == bi_start)):
+					print("Error: Found strand made entirely of skipped bases.")
+					sys.exit()
+
 				### found 3p end
 				if vi_next == -1:
 					topology[ni_curr][2] = -1
@@ -287,7 +336,7 @@ def setPositions(occupancy_scaf, occupancy_stap, vstrand_ijs, geo):
 
 	### count
 	nnt_scaf = max(x for vstrand in occupancy_scaf for box in vstrand for x in box)+1
-	nnt_stap = max(x for vstrand in occupancy_stap for box in vstrand for x in box)+1
+	nnt_stap = max((x for vstrand in occupancy_stap for box in vstrand for x in box), default=-1)+1
 
 	### initialize
 	r_scaf = np.zeros((nnt_scaf,3))
@@ -379,7 +428,7 @@ def mapBoxToPlacement(occupancy_scaf, occupancy_stap, vi, di, geo):
 			domain.append(None)
 
 		### skip
-		elif occupancy_scaf[vi][bi] and occupancy_scaf[vi][bi][0] == -1:
+		elif -1 in occupancy_scaf[vi][bi] or -1 in occupancy_stap[vi][bi]:
 			continue
 
 		### nucleotides
@@ -548,6 +597,10 @@ def setStapSeq(seq_scaf, occupancy_scaf, occupancy_stap, nnt_stap):
 			### loop over nucleotides within box
 			for ni_box in range(nnt_box):
 				ni_stap = occupancy_stap[vi][bi][ni_box]
+
+				### skip
+				if ni_stap == -1:
+					continue
 
 				### set as complement
 				if occupancy_scaf[vi][bi]:

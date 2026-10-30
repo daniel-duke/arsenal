@@ -102,6 +102,11 @@ def main():
 			else:
 				points, dbox3s, quats = ars.readAtomDump(datFile, nstep_skip, coarse_time, getDbox3s=True, getQuats=True)
 
+			### check that geometry and trajectory match
+			if points.shape[1] != len(points_init):
+				print(f"Error: Trajectory has {points.shape[1]} atoms, but geometry has {len(points_init)}.\n")
+				sys.exit(1)
+
 		### unit conversion
 		scale = convertToNm(units)
 		points_init *= scale

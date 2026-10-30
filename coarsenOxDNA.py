@@ -3,6 +3,7 @@ import argparse
 import sys
 import os
 import re
+import shutil
 
 ## Description
 # this script reads an oxDNA trajectory file and rewrites the data into a new
@@ -12,8 +13,12 @@ import re
   # longer than expected.
 # this script loads the old file and writes the new file line by line, which 
   # can be slower for small scripts, but it never times out.
-# this script runs from the terminal with two arguments: (1) the trajectory
-  # file to coarsen, (2) the coarsening factor.
+# this script runs from the terminal with the trajectory file to coarsen as its
+  # argument; the coarsening factor is set with --coarse-time.
+# the output goes next to the input (with "_cx{factor}" added to the name)
+  # unless --out is given.
+# the output is written to a temporary file and then swapped in, so anything
+  # reading the output (e.g. rsync) never sees a half-written file.
 
 
 ################################################################################
@@ -24,6 +29,7 @@ def main():
 	### get arguments
 	parser = argparse.ArgumentParser()
 	parser.add_argument('datFile',type=str)
+	parser.add_argument('--out',type=str,default=None)
 	parser.add_argument('--coarse-time',type=int,default=1)
 	parser.add_argument('--precision',type=int,default=8)
 	parser.add_argument('--keepVelocity',action='store_true')
@@ -33,7 +39,7 @@ def main():
 	args = parser.parse_args()
 
 	### read old, write new
-	readWriteOxDNA(args.datFile, args.coarse_time, args.hush, args.precision, args.keepVelocity, args.update, args.dryRun)
+	readWriteOxDNA(args.datFile, args.out, args.coarse_time, args.hush, args.precision, args.keepVelocity, args.update, args.dryRun)
 	if not args.hush: print()
 
 
@@ -41,8 +47,9 @@ def main():
 ### File Managers
 
 ### read oxdna trajectory, write coarsened one
-def readWriteOxDNA(datFile, coarse_time, hush, precision, keepVelocity, update, dryRun):
-	outDatFile = getCoarseName(datFile, coarse_time)
+def readWriteOxDNA(datFile, outDatFile, coarse_time, hush, precision, keepVelocity, update, dryRun):
+	if outDatFile is None:
+		outDatFile = getCoarseName(datFile, coarse_time)
 
 	### extract metadata
 	checkFileExist(datFile, "trajectory", requireData=True)
@@ -82,7 +89,7 @@ def readWriteOxDNA(datFile, coarse_time, hush, precision, keepVelocity, update, 
 		### check for old coarse file
 		nstep_old = 0
 		if update and os.path.isfile(outDatFile):
-			nstep_old, nbyte_old = checkOldFile(outDatFile, frames, nba_total, precision, keepVelocity)
+			nstep_old = checkOldFile(outDatFile, frames, nba_total, precision, keepVelocity)
 			if not hush:
 				print("{:1.2e} steps already coarsened".format(nstep_old))
 		else:
@@ -92,12 +99,16 @@ def readWriteOxDNA(datFile, coarse_time, hush, precision, keepVelocity, update, 
 		if dryRun:
 			return
 
-		### remove any incomplete frame from old file
-		if update:
-			os.truncate(outDatFile, nbyte_old)
+		### write coarse trajectory to temporary file
+		tmpDatFile = outDatFile + ".tmp"
+		with open(tmpDatFile, 'w', buffering=1024*1024) as fout:
 
-		### write coarse trajectory
-		with open(outDatFile, 'a' if update else 'w', buffering=1024*1024) as fout:
+			### copy the existing coarse frames
+			if update:
+				with open(outDatFile, 'r') as fold:
+					shutil.copyfileobj(fold, fout)
+
+			### then add the new ones
 			for i, (t_line, b_line, e_line, data_lines) in enumerate(frames, nstep_old):
 
 				### keep in touch (status bar only appears if there are new steps)
@@ -116,11 +127,13 @@ def readWriteOxDNA(datFile, coarse_time, hush, precision, keepVelocity, update, 
 				### write data
 				fout.write(''.join(formatLine(line, precision, keepVelocity) for line in data_lines))
 
+		### swap the finished file in, in one step
+		os.replace(tmpDatFile, outDatFile)
+
 
 ### check that old coarsened file matches the start of the coarsened trajectory
 def checkOldFile(outDatFile, frames, nba_total, precision, keepVelocity):
 	nstep_old = 0
-	nbyte_old = 0
 
 	### open old file
 	with open(outDatFile, 'r') as fold:
@@ -156,12 +169,11 @@ def checkOldFile(outDatFile, frames, nba_total, precision, keepVelocity):
 				print(f"Error: Position mismatch between old and new file.\n")
 				sys.exit(1)
 
-			### update counters
+			### update counter
 			nstep_old += 1
-			nbyte_old = fold.tell()
 
 	### results
-	return nstep_old, nbyte_old
+	return nstep_old
 
 
 ### iterate over complete frames that survive coarsening
