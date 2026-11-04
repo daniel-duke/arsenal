@@ -152,14 +152,14 @@ def main():
 		else:
 
 			### split and write geometry
-			axes_init = quatsToAxes(quats_init)
+			axes_init = ars.quatsToAxes(quats_init)
 			if align: axes_init = axes_init @ PCs_init
 			points_init, quats_init, radii_split, bonds, [molecules, colors] = ars.splitNucleotides(points_init, axes_init, bonds, [molecules, colors], types=types, radii_other=radii)
 			ars.writeGeo(outGeoFile, dbox3, points_init, molecules, colors, bonds, radii=radii_split, quats=quats_init)
 
 			### split and write trajectory
 			if datFile is not None:
-				axes = quatsToAxes(quats)
+				axes = ars.quatsToAxes(quats)
 				if align: axes = axes @ PCs[:,None]
 				points, quats = ars.splitNucleotides(points, axes, bonds, types=types, radii_other=radii)[:2]
 				ars.writeAtomDump(outDatFile, dbox3s, points, colors, quats=quats)
@@ -313,31 +313,6 @@ def readForce(forceFile):
 
 	### result
 	return clusters
-
-
-### wrapper function for converting quaternion trajectory to coordinate axes trajectory
-def quatsToAxes(quats):
-
-	### add time dimension to single frames
-	quats, ndim_add = ars.padDims(quats,3)
-
-	### initialize
-	nstep = quats.shape[0]
-	npoint = quats.shape[1]
-	axes = np.zeros((nstep,npoint,3,3))
-
-	### calculations
-	ars.initStatusBar("Calculating axes")
-	for i in range(nstep):
-		for j in range(npoint):
-			axes[i,j] = ars.quatToAxes(quats[i,j])
-		ars.updateStatusBar(i,nstep)
-
-	### add time dimension to single frames
-	quats = ars.trimDims(quats, ndim_add)
-
-	### result
-	return axes
 
 
 ### identify molecules (1 for unidentified, 2+ for molecule IDs)

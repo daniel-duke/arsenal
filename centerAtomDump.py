@@ -8,9 +8,14 @@ import os
   # by atom com, molecule com, or given molecule ID), optionally unwraps
   # the atoms from the boundary by molecule, and optionally sets the color
   # in the new trajectory.
-# the script outputs a file with the same name as the input file, modified to
-  # with "_centered" at the end (but before ".dat"); for example, the input file
-  # "trajectory.dat" would result in output file "trajectory_centered.dat"
+# this script runs from the terminal with the trajectory file to center as its
+  # argument; the centering point is set with --center ('none', 'com',
+  # 'com_molecules', or a molecule ID), molecules are unwrapped with --unwrap,
+  # and the second column is written as atom type (for coloring) with --setColor.
+# the output goes next to the input (with "_centered" added to the name)
+  # unless --out is given.
+# the output is written to a temporary file and then swapped in, so anything
+  # reading the output (e.g. rsync) never sees a half-written file.
 
 
 ################################################################################
@@ -21,13 +26,14 @@ def main():
 	### get arguments
 	parser = argparse.ArgumentParser()
 	parser.add_argument('datFile',type=str)
-	parser.add_argument('center',type=getCenterType,nargs='?',default='com')
-	parser.add_argument('unwrap',type=int,nargs='?',default=0)
-	parser.add_argument('setColor',type=int,nargs='?',default=0)
-	parser.add_argument('report',type=int,nargs='?',default=0)
+	parser.add_argument('--out',type=str,default=None)
+	parser.add_argument('--center',type=getCenterType,default='com')
 	parser.add_argument('--mol-col',type=int,default=2)
 	parser.add_argument('--color-col',type=int,default=2)
+	parser.add_argument('--unwrap',action='store_true')
+	parser.add_argument('--setColor',action='store_true')
 	parser.add_argument('--excludeDummy',action='store_true')
+	parser.add_argument('--hush',action='store_true')
 	args = parser.parse_args()
 
 	### convert to 0-based column indices
@@ -35,24 +41,25 @@ def main():
 	col_color = args.color_col-1
 
 	### read file (no skipped steps, no coarsening)
-	points, molecules, colors, dbox3s, steps_per_frame = readAtomDump(args.datFile, col_mol, col_color, args.report)
+	points, molecules, colors, dbox3s, steps = readAtomDump(args.datFile, col_mol, col_color, args.hush)
 
 	### center the points
-	points_centered = centerPointsMolecule(points, molecules, dbox3s, args.center, args.unwrap, args.report, args.excludeDummy)
+	points_centered = centerPointsMolecule(points, molecules, dbox3s, args.center, args.unwrap, args.hush, args.excludeDummy)
 
 	### write output file
-	outDatFile = addSuffix(args.datFile, "_centered")
-	writeAtomDump(outDatFile, points_centered, colors, dbox3s, steps_per_frame, args.setColor, args.report)
+	outDatFile = args.out if args.out is not None else addSuffix(args.datFile, "_centered")
+	writeAtomDump(outDatFile, points_centered, colors, dbox3s, steps, args.setColor, args.hush)
+	if not args.hush: print()
 
 
 ################################################################################
 ### File Managers
 
 ### read lammps-style atom dump
-def readAtomDump(datFile, col_mol, col_color, report):
+def readAtomDump(datFile, col_mol, col_color, hush):
 
 	### count lines
-	checkFileExist(datFile, "trajectory")
+	checkFileExist(datFile, "trajectory", requireData=True)
 	with open(datFile, 'rb') as f:
 		nline = sum(1 for _ in f)
 
@@ -63,7 +70,6 @@ def readAtomDump(datFile, col_mol, col_color, report):
 		header = []
 		for i in range(9):
 			header.append(f.readline())
-		step_init = int(header[1].split()[0])
 		nbd_total = int(header[3].split()[0])
 
 		### parse columns
@@ -77,14 +83,8 @@ def readAtomDump(datFile, col_mol, col_color, report):
 				isScaled = False
 				col_x = i-2
 		if col_x is None:
-			print("Error: No position data found.")
+			print("Error: No position data found.\n")
 			sys.exit(1)
-
-		### look for next frame
-		steps_per_frame = 0
-		for i in range(nbd_total+2):
-			line = f.readline()
-		if line: steps_per_frame = int(line.split()[0]) - step_init
 
 	### count steps
 	nstep = nline // (nbd_total+9)
@@ -94,12 +94,14 @@ def readAtomDump(datFile, col_mol, col_color, report):
 	molecules = np.zeros(nbd_total,dtype=int)
 	colors = np.zeros(nbd_total,dtype=int)
 	dbox3s = np.zeros((nstep,3))
+	steps = np.zeros(nstep,dtype=int)
 
 	### extract the data
-	if report: initStatusBar("Reading file")
+	if not hush: initStatusBar("Reading file")
 	with open(datFile, 'r') as f:
 		for i in range(nstep):
 			content = [f.readline() for _ in range(nbd_total+9)]
+			steps[i] = int(content[1].split()[0])
 			for k in range(3):
 				line = content[5+k].split()
 				dbox3s[i,k] = float(line[1]) - float(line[0])
@@ -112,23 +114,24 @@ def readAtomDump(datFile, col_mol, col_color, report):
 				if isScaled:
 					points[i,j] = (points[i,j]-1/2)*dbox3s[i]
 			points[i] = applyPBC(points[i], dbox3s[i])
-			if report: updateStatusBar(i,nstep)
+			if not hush: updateStatusBar(i,nstep)
 
 	### result
-	return points, molecules, colors, dbox3s, steps_per_frame
+	return points, molecules, colors, dbox3s, steps
 
 
 ### write lammps-style trajectory
-def writeAtomDump(outDatFile, points, col2s, dbox3s, steps_per_frame, setColor, report):
+def writeAtomDump(outDatFile, points, col2s, dbox3s, steps, setColor, hush):
 	nstep = points.shape[0]
 	npoint = points.shape[1]
 	len_npoint = len(str(npoint))
 	len_ncol2 = len(str(max(col2s)))
-	if report: initStatusBar("Writing file")
-	with open(outDatFile,'w') as f:
+	if not hush: initStatusBar("Writing file")
+	tmpDatFile = outDatFile + ".tmp"
+	with open(tmpDatFile,'w',buffering=1024*1024) as f:
 		for i in range(nstep):
 			len_dbox = len(str(int(max(dbox3s[i])/2)))
-			f.write(f"ITEM: TIMESTEP\n{i*steps_per_frame}\n")
+			f.write(f"ITEM: TIMESTEP\n{steps[i]}\n")
 			f.write(f"ITEM: NUMBER OF ATOMS\n{npoint}\n")
 			f.write(f"ITEM: BOX BOUNDS pp pp pp\n")
 			f.write(f"-{dbox3s[i,0]/2:<{len_dbox+3}.2f} {dbox3s[i,0]/2:<{len_dbox+3}.2f} xlo xhi\n")
@@ -144,14 +147,17 @@ def writeAtomDump(outDatFile, points, col2s, dbox3s, steps_per_frame, setColor, 
 						f"{points[i,j,0]/dbox3s[i,0]+1/2:10.8f} " + \
 						f"{points[i,j,1]/dbox3s[i,1]+1/2:10.8f} " + \
 						f"{points[i,j,2]/dbox3s[i,2]+1/2:10.8f}\n")
-			if report: updateStatusBar(i,nstep)
+			if not hush: updateStatusBar(i,nstep)
+
+	### swap in the finished file
+	os.replace(tmpDatFile, outDatFile)
 
 
 ################################################################################
 ### Calculations
 
 ### shift trajectory, placing the given point at the center, optionally unwrapping molecules at boundary
-def centerPointsMolecule(points, molecules, dbox3s, center, unwrap, report, excludeDummy):
+def centerPointsMolecule(points, molecules, dbox3s, center, unwrap, hush, excludeDummy):
 	nstep = points.shape[0]
 	npoint = points.shape[1]
 	nmolecule = int(max(molecules))
@@ -164,7 +170,7 @@ def centerPointsMolecule(points, molecules, dbox3s, center, unwrap, report, excl
 	points_centered = np.zeros((nstep,npoint,3))
 
 	### loop over steps
-	if report: initStatusBar("Centering")
+	if not hush: initStatusBar("Centering")
 	for i in range(nstep):
 
 		### calculate molecule coms
@@ -184,7 +190,7 @@ def centerPointsMolecule(points, molecules, dbox3s, center, unwrap, report, excl
 			com = calcCOM(points[i], dbox3s[i], excludeDummy)
 		elif center == 'com_molecules' or center == 'com_clusters':
 			com = calcCOM(molecule_coms, dbox3s[i], excludeDummy)
-		elif isinteger(center) and center <= nmolecule:
+		elif isinteger(center) and 1 <= center <= nmolecule:
 			com = molecule_coms[center-1]
 		else:
 			print("Error: Cannot center points - center must be either 'none', 'com', 'com_molecules', or integer <= nmolecule.\n")
@@ -205,7 +211,7 @@ def centerPointsMolecule(points, molecules, dbox3s, center, unwrap, report, excl
 			points_centered[i] = refs + applyPBC(points_centered[i]-refs, dbox3s[i])
 
 		### progress updates
-		if report: updateStatusBar(i,nstep)
+		if not hush: updateStatusBar(i,nstep)
 
 	### result
 	return points_centered
@@ -334,5 +340,4 @@ def updateStatusBar(i, n, length=30, units='steps'):
 ### run the script
 if __name__ == "__main__":
 	main()
-	print()
 

@@ -9,6 +9,10 @@ import sys
   # (.dat) files, and a cluster file, and moves each cluster in the second
   # (non-ideal) configuration to match the scaffold positions in the first
   # (ideal) configuration.
+# this script is useful when a the configuration for a design has been
+  # painstakingly optimized (usually in oxView, starting from caDNAno),
+  # then edits are made to the staples in caDNAno; in this situation, this
+  # script avoids repeating configuration optimization.
 # the scaffold must be the same in both configurations, and it must be the
   # first strand in both (the topology is used only to get the scaffold length);
   # the staples may differ between the two configurations.

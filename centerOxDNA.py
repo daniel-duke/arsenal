@@ -4,17 +4,15 @@ import sys
 import os
 
 ## Description
-# this script reads an oxDNA trajecotry, centers the bases, and writes the data
+# this script reads an oxDNA trajectory, centers the bases, and writes the data
   # into a new trajectory file.
-# this script runs from the command line with one argumnets, the name of
-  # the trajectory file to load and center.
-# there is also an optional second argument which sets the precision to use when
-  # writing the output file (defaults to 15, the same as what oxDNA prints).
-# there is also an optional third argument which sets the number of steps
-  # between printing progress updates (defaults to 0 for no updates).
-# the script outputs a file with the same name as the input file, modified to
-  # with "_centered" at the end (but before ".dat"); for example, the input file
-  # "trajectory.dat" would result in output file "trajectory_centered.dat"
+# this script runs from the terminal with the trajectory file to center as its
+  # argument; the number of decimal places written is set with --precision
+  # (at most 15, the same as what oxDNA prints).
+# the output goes next to the input (with "_centered" added to the name)
+  # unless --out is given.
+# the output is written to a temporary file and then swapped in, so anything
+  # reading the output (e.g. rsync) never sees a half-written file.
 
 
 ################################################################################
@@ -25,25 +23,28 @@ def main():
 	### get arguments
 	parser = argparse.ArgumentParser()
 	parser.add_argument('datFile',type=str)
-	parser.add_argument('precision',type=int,nargs='?',default=8)
-	parser.add_argument('report',type=int,nargs='?',default=0)
+	parser.add_argument('--out',type=str,default=None)
+	parser.add_argument('--precision',type=int,default=8)
+	parser.add_argument('--hush',action='store_true')
 	args = parser.parse_args()
 
 	### check arguments
 	if args.precision > 15:
-		print("Error: Precision should not be greater than 15.")
+		print("Error: Precision should not be greater than 15.\n")
 		sys.exit(1)
 
 	### read old, write new
-	readWriteOxDNA(args.datFile, args.precision, args.report)
+	readWriteOxDNA(args.datFile, args.out, args.precision, args.hush)
+	if not args.hush: print()
 
 
 ################################################################################
 ### File Managers
 
-### read oxdna trajectory
-def readWriteOxDNA(datFile, precision, report):
-	outDatFile = addSuffix(datFile, "_centered")
+### read oxdna trajectory, write centered one
+def readWriteOxDNA(datFile, outDatFile, precision, hush):
+	if outDatFile is None:
+		outDatFile = addSuffix(datFile, "_centered")
 
 	### extract metadata
 	checkFileExist(datFile, "trajectory", requireData=True)
@@ -53,9 +54,12 @@ def readWriteOxDNA(datFile, precision, report):
 		dbox3 = np.array(line.split()[2:5],dtype=float)
 
 		line = f.readline()
+		line = f.readline()
+		ncol = len(line.split())
 		nba_total = 0
-		while f.readline().split()[0] != 't':
+		while line and line[0] != 't':
 			nba_total += 1
+			line = f.readline()
 
 	### count lines
 	with open(datFile, 'rb') as f:
@@ -64,10 +68,11 @@ def readWriteOxDNA(datFile, precision, report):
 	### count steps
 	nstep = nline // (nba_total+3)
 
-	### write new file
-	data = np.zeros((nba_total,15),dtype=float)
-	if report: initStatusBar("Centering")
-	with open(outDatFile, 'w') as fout:
+	### write new file to temporary file
+	data = np.zeros((nba_total,ncol),dtype=float)
+	if not hush: initStatusBar("Centering")
+	tmpDatFile = outDatFile + ".tmp"
+	with open(tmpDatFile, 'w', buffering=1024*1024) as fout:
 		with open(datFile) as fin:
 			for i in range(nstep):
 				for j in range(3):
@@ -78,11 +83,14 @@ def readWriteOxDNA(datFile, precision, report):
 				if not line:
 					break
 				for j in range(nba_total):
-					data[j] = np.fromstring(fin.readline(), sep=' ')
+					data[j] = fin.readline().split()
 				com = calcCOM(data[:,:3], dbox3)
 				data[:,:3] = applyPBC( data[:,:3]-com, dbox3 )
-				np.savetxt(fout, data, fmt=f'%.{precision}g')
-				if report: updateStatusBar(i,nstep)
+				np.savetxt(fout, data, fmt=f'%.{precision}f')
+				if not hush: updateStatusBar(i,nstep)
+
+	### swap in the finished file
+	os.replace(tmpDatFile, outDatFile)
 
 
 ################################################################################
@@ -169,5 +177,4 @@ def updateStatusBar(i, n, length=30, units='steps'):
 ### run the script
 if __name__ == "__main__":
 	main()
-	print()
 

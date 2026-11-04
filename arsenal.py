@@ -3579,6 +3579,31 @@ def quatToAxes(q):
 	return a
 
 
+### convert oxDNA quaternions to coordinate axes, for every particle in a single frame or a trajectory
+def quatsToAxes(quats):
+
+	### add time dimension to single frames
+	quats, ndim_add = ars.padDims(quats,3)
+
+	### initialize
+	nstep = quats.shape[0]
+	npoint = quats.shape[1]
+	axes = np.zeros((nstep,npoint,3,3))
+
+	### calculations
+	ars.initStatusBar("Calculating axes")
+	for i in range(nstep):
+		for j in range(npoint):
+			axes[i,j] = ars.quatToAxes(quats[i,j])
+		ars.updateStatusBar(i,nstep)
+
+	### remove time dimension from single frames
+	axes = ars.trimDims(axes, ndim_add)
+
+	### result
+	return axes
+
+
 ### convert coordinate axes to oxDNA quaternion
 def axesToQuat(a):
 	q = np.zeros(4)

@@ -8,8 +8,12 @@ import sys
 # this script reads an oxDNA trajectory of a nanostructure with floppy ssDNA
   # brushes and computes a 3D density map of where the brush nucleotides go
   # over the course of the trajectory.
+# the simulation can be run with oxDNA (topology and configuration/trajectory
+  # files) or with LAMMPS (geometry file and atom dump with quaternions, in oxDNA
+  # units, as in lammpify); which one is detected from the trajectory file.
 # the cluster file contains the base indices for the brushes (one cluster per
-  # brush); all of the remaining base indices make up the core.
+  # brush); all of the remaining nucleotides make up the core. the indices start
+  # at 0 for oxDNA simulations, and at 1 for LAMMPS simulations (as in lammpify).
 # every frame is aligned to the mean structure, as controlled by three options:
   # --fit gives the nucleotides that the rotation is fit to (core, all, or
   # brushes), --axis restricts the rotation (free, none, or about a single
@@ -33,8 +37,8 @@ def main():
 
 	### get arguments
 	parser = argparse.ArgumentParser()
-	parser.add_argument('topFile',			type=str, default=None,		help='name of topology file')
-	parser.add_argument('datFile',			type=str, default=None,		help='name of configuration/trajectory file')
+	parser.add_argument('topFile',			type=str, default=None,		help='name of topology file (oxDNA) or geometry file (LAMMPS)')
+	parser.add_argument('datFile',			type=str, default=None,		help='name of configuration/trajectory file (oxDNA) or atom dump file (LAMMPS)')
 	parser.add_argument('clusterFile',		type=str, default=None,		help="name of cluster file")
 	parser.add_argument('--nstep-skip', 	type=int, default=0,		help="number of recorded initial steps to skip")
 	parser.add_argument('--coarse-time',	type=int, default=1,		help="coarse factor for time steps")
@@ -63,18 +67,23 @@ def main():
 	outGeoFile = outFold + "geometry.in"
 	outOvitoFile = outFold + "brushes.ovito"
 
-	### read topology and cluster definitions
-	strands, bonds, nba_total = readTop(args.topFile)
-	clusters = ars.readCluster(args.clusterFile)
+	### read topology (or geometry, for LAMMPS) and cluster definitions
+	lammps = isLammps(args.datFile)
+	strands, bonds, nba_total, bais_nt, types, radii_other = readStructure(args.topFile, lammps)
+	clusters = getClusters(args.clusterFile, nba_total, lammps)
 
 	### identify the groups of nucleotides, and the ones the alignment uses
-	groups = getGroups(clusters, nba_total)
+	groups = getGroups(clusters, bais_nt)
 	bais_fit, bais_pivot = getAlignmentGroups(groups, args.fit, axis, pivot, args.alignToBox)
 	bais_brush = groups['brushes']
 
 	### read trajectory, fixing periodic boundary breaks (and centering, unless the alignment pivots about a fixed point)
-	points, dbox3, axes = ars.readOxDNA(args.datFile, args.nstep_skip, args.coarse_time, getDbox3=True, getAxes=True)
-	points = ars.centerPointsMolecule(points, strands, dbox3, center='none' if bais_pivot is None else 'com', unwrap=True)
+	points, dbox3s, axes = readTrajectory(args.datFile, args.nstep_skip, args.coarse_time, lammps)
+	if points.shape[1] != nba_total:
+		print(f"Error: Trajectory has {points.shape[1]} particles, but the topology or geometry has {nba_total}.")
+		sys.exit(1)
+	points = ars.centerPointsMolecule(points, strands, dbox3s, center='none' if bais_pivot is None else 'com', unwrap=True)
+	dbox3 = dbox3s[0]
 
 	### align every frame to the mean structure
 	points, pivot = setPivot(points, bais_pivot, pivot)
@@ -101,7 +110,7 @@ def main():
 
 	else:
 		### write geometry
-		r_ref, quats_ref, radii, bonds, [colors] = ars.splitNucleotides(r_ref, axes_ref, bonds, [colors])
+		r_ref, quats_ref, radii, bonds, [colors] = ars.splitNucleotides(r_ref, axes_ref, bonds, [colors], types=types, radii_other=radii_other)
 		ars.writeGeo(outGeoFile, dbox3, r_ref, types=colors, bonds=bonds, radii=radii, quats=quats_ref)
 
 	### write the density grids
@@ -133,6 +142,41 @@ def readTop(topFile):
 			bond_count += 1
 	bonds = bonds[:bond_count,:]
 	return strands, bonds, nba_total
+
+
+### read the structure of the simulation: the oxDNA topology, or the LAMMPS geometry. for LAMMPS, only the
+  # particles of types 1-4 are nucleotides; the types and radii (in nm) of all the particles are returned
+  # so that any other particles can be treated properly (for oxDNA, these are None as all are nucleotides)
+def readStructure(topFile, lammps):
+	if not lammps:
+		strands, bonds, nba_total = readTop(topFile)
+		return strands, bonds, nba_total, np.arange(nba_total), None, None
+	r, dbox3, strands, types, radii, quats, bonds = ars.readGeo(topFile, style='ox', getDbox3=True, getBonds=True)
+	bais_nt = np.flatnonzero((types >= 1) & (types <= 4))
+	return strands, bonds, len(r), bais_nt, types, radii*ars.ox2nm
+
+
+### read the trajectory: positions and box diameters at every step (in nm), and the orientations as coordinate axes
+def readTrajectory(datFile, nstep_skip, coarse_time, lammps):
+	if not lammps:
+		points, dbox3, axes = ars.readOxDNA(datFile, nstep_skip, coarse_time, getDbox3=True, getAxes=True)
+		dbox3s = np.tile(dbox3, (points.shape[0],1))
+	else:
+		points, dbox3s, quats = ars.readAtomDump(datFile, nstep_skip, coarse_time, getDbox3s=True, getQuats=True)
+		points *= ars.ox2nm
+		dbox3s *= ars.ox2nm
+		axes = ars.quatsToAxes(quats)
+	return points, dbox3s, axes
+
+
+### read the cluster file, as 0-based base indices (the indices in the file start at 1 for LAMMPS)
+def getClusters(clusterFile, nba_total, lammps):
+	clusters = ars.readCluster(clusterFile)
+	if lammps: clusters = [ [i-1 for i in cluster] for cluster in clusters ]
+	if any(i < 0 or i >= nba_total for cluster in clusters for i in cluster):
+		print(f"Error: Cluster file has base indices outside of the range {int(lammps)} to {nba_total-1+int(lammps)}.")
+		sys.exit(1)
+	return clusters
 
 
 ### write Gaussian cube file (for ovito)
@@ -313,21 +357,27 @@ def alignFrames(points, axes, bais_fit, axis, pivot):
 ################################################################################
 ### Utility Functions
 
+### determine from the first line of the trajectory file whether it is from LAMMPS (rather than oxDNA)
+def isLammps(datFile):
+	ars.checkFileExist(datFile, "trajectory")
+	with open(datFile) as f:
+		return f.readline().startswith("ITEM")
+
+
 ### interpret a command line argument given as a keyword, a number, or a list of numbers
 def getArgType(arg):
 	arg = [ int(a) if a.isdigit() else float(a) if ars.isnumber(a) else a for a in arg ]
 	return arg[0] if len(arg) == 1 else arg
 
 
-### identify the groups of nucleotides (as lists of base indices): the brushes are all the clusters, and the core is everything else
-def getGroups(clusters, nba_total):
+### identify the groups of nucleotides (as lists of base indices): the brushes are all the clusters, and the core is all the other nucleotides
+def getGroups(clusters, bais_nt):
 	if len(clusters) == 0:
 		print("Error: No brush clusters found in the cluster file.")
 		sys.exit(1)
-	bais_all = np.arange(nba_total)
 	bais_brush = combineClusters(clusters)
-	return { 'core'		: np.setdiff1d(bais_all, bais_brush),
-			 'all'		: bais_all,
+	return { 'core'		: np.setdiff1d(bais_nt, bais_brush),
+			 'all'		: bais_nt,
 			 'brushes'	: bais_brush }
 
 
