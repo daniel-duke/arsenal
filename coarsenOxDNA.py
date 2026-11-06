@@ -8,29 +8,14 @@ import shutil
 ## Description
 # this script reads an oxDNA trajectory file and rewrites the data into a new
   # file with coarsened time steps.
-# this can help reduce file sizes when the output frequency of the simulation
-  # was not set appropriately, or when the simulation needed to be run for
-  # longer than expected.
-# this script loads the old file and writes the new file line by line, which 
-  # can be slower for small scripts, but it never times out.
 # this script runs from the terminal with the trajectory file to coarsen as its
-  # argument; the coarsening is set by one of two options:
-  # --coarse-time keeps every nth frame, regardless of step number (oxDNA does
-  # not record step 0, so the kept steps are n, 2n, ... times the original
-  # steps per frame, just as if oxDNA had been run with the coarser output).
-  # --steps-per-frame keeps only frames whose step number is divisible by it.
+  # argument; the coarsening is set by one of two options: (1) coarse-time
+  # keeps every nth frame, regardless of step number, and (2) steps-per-frame
+  # keeps only frames whose step number is divisible by it.
 # step numbers are kept from the original trajectory, unless --setSteps is
-  # given (only with --steps-per-frame), which renumbers the kept frames as
-  # steps_per_frame, 2*steps_per_frame, ...
-# the output goes next to the input (with "_cx{coarse_time}" or
-  # "_spf{steps_per_frame}" added to the name) unless --out is given;
-  # coarsening an already coarse-timed file by coarse-time combines the
-  # factors (e.g. "_cx2" then --coarse-time 3 gives "_cx6").
-# --dryRun reports the step counts without writing anything; adding
-  # --printSteps also lists the step of every frame and its step after
-  # coarsening (blank if the frame is dropped).
-# the output is written to a temporary file and then swapped in, so anything
-  # reading the output (e.g. rsync) never sees a half-written file.
+  # given (only with --steps-per-frame), which renumbers the starting from 0.
+# dryRun reports the step counts without writing anything; adding printSteps
+  # also lists the step of every frame and its step after coarsening.
 
 
 ################################################################################

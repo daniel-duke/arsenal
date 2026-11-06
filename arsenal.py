@@ -627,11 +627,19 @@ def readDump(dumpFile, nstep_skip=0, coarse_time=1, cols='all', nstep_max='all',
 	### count columns
 	ncol = len(cols)
 
+	### count steps
+	with open(dumpFile, 'rb') as f:
+		nstep_recorded = sum(1 for line in f if line.startswith(b'ITEM: TIMESTEP'))
+	nstep_use = max(0, (nstep_recorded-nstep_skip-1)//coarse_time + 1)
+	if nstep_max:
+		nstep_use = min(nstep_use, nstep_max)
+
 	### initialize
 	data = []
 	step_count = 0
 
 	### loop over lines
+	if not hush: ars.initStatusBar("Reading file")
 	with open(dumpFile, 'r') as f:
 		content = iter(f)
 		for line in content:
@@ -664,6 +672,9 @@ def readDump(dumpFile, nstep_skip=0, coarse_time=1, cols='all', nstep_max='all',
 
 				### save step data
 				data.append(data_step)
+
+				### progress updates
+				if not hush: ars.updateStatusBar(len(data)-1,nstep_use)
 
 				### stop collecting data
 				if len(data) == nstep_max:

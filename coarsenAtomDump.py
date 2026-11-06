@@ -6,31 +6,17 @@ import re
 import shutil
 
 ## Description
-# this script reads a LAMMPS-style trajectory file and rewrites the data into a
-  # new file with coarsened time steps.
-# this can help reduce file sizes when the output frequency of the simulation
-  # was not set appropriately, or when the simulation needed to be run for
-  # longer than expected.
-# this script loads the old file and writes the new file line by line, which 
-  # can be slower for small scripts, but it never times out.
+# this script reads a LAMMPS-style trajectory file (or any dump file with the
+  # appropriate header) and rewrites the data into a new file with coarsened
+  # time steps.
 # this script runs from the terminal with the trajectory file to coarsen as its
-  # argument; the coarsening is set by one of two options:
-  # --coarse-time keeps every nth frame, regardless of step number (starting
-  # with the first frame, just as if LAMMPS had been run with the coarser
-  # output).
-  # --steps-per-frame keeps only frames whose step number is divisible by it.
+  # argument; the coarsening is set by one of two options: (1) coarse-time
+  # keeps every nth frame, regardless of step number, and (2) steps-per-frame
+  # keeps only frames whose step number is divisible by it.
 # step numbers are kept from the original trajectory, unless --setSteps is
-  # given (only with --steps-per-frame), which renumbers the kept frames as
-  # 0, steps_per_frame, 2*steps_per_frame, ...
-# the output goes next to the input (with "_cx{coarse_time}" or
-  # "_spf{steps_per_frame}" added to the name) unless --out is given;
-  # coarsening an already coarse-timed file by coarse-time combines the
-  # factors (e.g. "_cx2" then --coarse-time 3 gives "_cx6").
-# --dryRun reports the step counts without writing anything; adding
-  # --printSteps also lists the step of every frame and its step after
-  # coarsening (blank if the frame is dropped).
-# the output is written to a temporary file and then swapped in, so anything
-  # reading the output (e.g. rsync) never sees a half-written file.
+  # given (only with --steps-per-frame), which renumbers the starting from 0.
+# dryRun reports the step counts without writing anything; adding printSteps
+  # also lists the step of every frame and its step after coarsening.
 
 
 ################################################################################
@@ -106,8 +92,7 @@ def readWriteAtomDump(datFile, outDatFile, coarse_time, steps_per_frame, setStep
 	### report step counts
 	if not hush:
 		with open(datFile, 'rb') as f:
-			nline = sum(1 for _ in f)
-		nstep_recorded = nline // (nbd_total+9)
+			nstep_recorded = sum(1 for line in f if line.startswith(b'ITEM: TIMESTEP'))
 		nstep_coarse = countCoarseFrames(step_initial, steps_per_frame_initial, nstep_recorded, coarse_time, steps_per_frame, 0)
 		nstep_simulation = (nstep_recorded-1)*steps_per_frame_initial
 		print("{:1.2e} steps in simulation".format(nstep_simulation))
@@ -116,12 +101,12 @@ def readWriteAtomDump(datFile, outDatFile, coarse_time, steps_per_frame, setStep
 
 	### open source trajectory
 	with open(datFile, 'r') as fin:
-		frames = coarsenFrames(readFrames(fin, nbd_total), coarse_time, steps_per_frame, setSteps, 0)
+		frames = coarsenFrames(readFrames(fin), coarse_time, steps_per_frame, setSteps, 0)
 
 		### check for old coarse file
 		nstep_old = 0
 		if update and os.path.isfile(outDatFile):
-			nstep_old = checkOldFile(outDatFile, frames, nbd_total)
+			nstep_old = checkOldFile(outDatFile, frames)
 			if not hush:
 				print("{:1.2e} steps already coarsened".format(nstep_old))
 		else:
@@ -130,7 +115,7 @@ def readWriteAtomDump(datFile, outDatFile, coarse_time, steps_per_frame, setStep
 		### stop before changing anything
 		if dryRun:
 			if printSteps:
-				printFrameSteps(datFile, nbd_total, coarse_time, steps_per_frame, setSteps)
+				printFrameSteps(datFile, coarse_time, steps_per_frame, setSteps)
 			return
 
 		### write coarse trajectory to temporary file
@@ -161,14 +146,14 @@ def readWriteAtomDump(datFile, outDatFile, coarse_time, steps_per_frame, setStep
 
 
 ### check that old coarsened file matches the start of the coarsened trajectory
-def checkOldFile(outDatFile, frames, nbd_total):
+def checkOldFile(outDatFile, frames):
 	nstep_old = 0
 
 	### open old file
 	with open(outDatFile, 'r') as fold:
 
 		### loop over old frames
-		for frame_old in readFrames(fold, nbd_total):
+		for frame_old in readFrames(fold):
 
 			### get matching new frame
 			frame_new = next(frames, None)
@@ -181,8 +166,8 @@ def checkOldFile(outDatFile, frames, nbd_total):
 				print(f"Error: Time step mismatch between old and new file.\n")
 				sys.exit(1)
 
-			### compare first atom
-			if frame_old[9] != frame_new[9]:
+			### compare first entry (if any)
+			if frame_old[9:10] != frame_new[9:10]:
 				print(f"Error: Atom data mismatch between old and new file.\n")
 				sys.exit(1)
 
@@ -194,7 +179,7 @@ def checkOldFile(outDatFile, frames, nbd_total):
 
 
 ### iterate over complete frames
-def readFrames(fin, nbd_total):
+def readFrames(fin):
 	while True:
 
 		### check for new frame
@@ -202,8 +187,14 @@ def readFrames(fin, nbd_total):
 		if not line:
 			return
 
-		### read rest of frame
-		frame_lines = [line] + [fin.readline() for _ in range(nbd_total+8)]
+		### read header through entry count
+		frame_lines = [line] + [fin.readline() for _ in range(3)]
+		if not frame_lines[-1].endswith('\n'):
+			return
+
+		### read rest of frame (entry count can change between frames)
+		nentry = int(frame_lines[3].split()[0])
+		frame_lines += [fin.readline() for _ in range(nentry+5)]
 
 		### stop at incomplete frame (simulation still writing)
 		if not frame_lines[-1].endswith('\n'):
@@ -213,10 +204,10 @@ def readFrames(fin, nbd_total):
 
 
 ### print the step of every frame, next to its step after coarsening
-def printFrameSteps(datFile, nbd_total, coarse_time, steps_per_frame, setSteps):
+def printFrameSteps(datFile, coarse_time, steps_per_frame, setSteps):
 	print(f"{'original':<12} coarsened")
 	with open(datFile, 'r') as fin:
-		for frame_lines, step, step_new in labelFrames(readFrames(fin, nbd_total), coarse_time, steps_per_frame, setSteps, 0):
+		for frame_lines, step, step_new in labelFrames(readFrames(fin), coarse_time, steps_per_frame, setSteps, 0):
 			print(f"{step:<12} {'' if step_new is None else step_new}")
 
 
