@@ -22,8 +22,8 @@
 
 ### parameters
 stages=(min relax prod)
-topFile=file.top
-confFile=file_init.dat
+topFile=ds_bp256.top
+confFile=ds_bp256_ideal.top
 
 ### kick things off
 echo "Start Time: $(date)"

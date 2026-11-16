@@ -41,6 +41,10 @@ if [ "$backend" = "CUDA" ]; then
 elif [ "$backend" = "CPU" ]; then
 	oxdna=$oxdna_cpu
 fi
+if [ -z "$oxdna" ] || [ ! -f "$oxdna" ]; then
+	echo "Error: Could not find oxDNA executable."
+	exit 1
+fi
 echo "oxDNA: $oxdna"
 
 ### set up scratch folder
