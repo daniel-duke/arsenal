@@ -1,0 +1,43 @@
+
+#------ Begin Input ------#
+# Template version: 2.0 on 11/11/26
+
+## CONDITIONS
+steps = 1E6
+dt = 0.001
+T = 20C
+salt_concentration = 1
+
+## INPUT FILES
+topology = BLANK
+conf_file = last_conf_min.dat
+
+## OUTPUT FILES
+lastconf_file = last_conf.dat
+trajectory_file = scratch/trajectory.dat
+energy_file = energy.dat
+
+## OUTPUT OPTIONS
+print_conf_interval = 1E5
+print_energy_every  = 1E5
+
+## COMPUTING OPTIONS
+backend = CUDA
+backend_precision = mixed
+CUDA_list = verlet
+CUDA_sort_every = 0
+use_edge = 1
+edge_n_forces = 1
+max_density_multiplier = 10
+
+## RARELY CHANGED
+interaction_type = DNA2
+sim_type = MD
+thermostat = langevin
+diff_coeff = 2.5
+verlet_skin = 0.2
+time_scale = linear
+refresh_vel = 1
+restart_step_counter = 1
+
+#------- End Input -------#

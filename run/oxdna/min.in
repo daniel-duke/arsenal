@@ -1,0 +1,35 @@
+
+#------ Begin Input ------#
+# Template version: 2.0 on 11/11/26
+
+## CONDITIONS
+steps = 1E4
+T = 20C
+salt_concentration = 1
+
+## INPUT FILES
+topology = BLANK
+conf_file = BLANK
+
+## OUTPUT FILES
+lastconf_file = last_conf.dat
+trajectory_file = scratch/trajectory.dat
+energy_file = energy.dat
+
+## OUTPUT OPTIONS
+print_conf_interval = 1E3
+print_energy_every  = 1E3
+
+## RARELY CHANGED
+backend = CPU
+interaction_type = DNA2
+sim_type = MC
+ensemble = NVT
+delta_translation = 0.22
+delta_rotation = 0.22
+verlet_skin = 0.5
+time_scale = linear
+refresh_vel = 1
+restart_step_counter = 1
+
+#------- End Input -------#

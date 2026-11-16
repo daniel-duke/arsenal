@@ -1774,6 +1774,7 @@ def plotConv(A, figLabel='auto', Alabel=None, Alim='auto', title=None, **kwargs)
 	dt_per_frame 	= None 		if 'dt_per_frame' not in kwargs else kwargs['dt_per_frame']
 	plotAsLine		= False		if 'plotAsLine' not in kwargs else kwargs['plotAsLine']
 	boxAsIs			= False		if 'boxAsIs' not in kwargs else kwargs['boxAsIs']
+	intTicks		= False		if 'intTicks' not in kwargs else kwargs['intTicks']
 	ax 				= None 		if 'ax' not in kwargs else kwargs['ax']
 
 	### numpify data
@@ -1782,7 +1783,10 @@ def plotConv(A, figLabel='auto', Alabel=None, Alim='auto', title=None, **kwargs)
 	### process y-axis limits
 	if isinstance(Alim, str) and Alim == 'auto':
 		Amin = min(A); Amax = max(A)
-		Alim = [ Amin-(Amax-Amin)*0.6, Amax+(Amax-Amin)*0.4 ]
+		if Amax > Amin:
+			Alim = [ Amin-(Amax-Amin)*0.6, Amax+(Amax-Amin)*0.4 ]
+		else:
+			Alim = [ Amin-6, Amin+4 ]
 	elif not ars.isarray(Alim) or len(Alim) != 2:
 		print("Flag: Not setting convergence plot y-axis limits - Alim must be either 'auto' or 2-element array.")
 		Alim = None
@@ -1820,6 +1824,10 @@ def plotConv(A, figLabel='auto', Alabel=None, Alim='auto', title=None, **kwargs)
 
 	### initialize figure
 	ars.initFig(figLabel, Xlabel, Alabel, Xlim, Alim, title, ax, "Conv", boxAsIs=boxAsIs)
+
+	### make y-axis ticks integers
+	if intTicks:
+		plt.gca().yaxis.set_major_locator(MaxNLocator(integer=True))
 
 	### plot data
 	if not plotAsLine:

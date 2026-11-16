@@ -13,7 +13,10 @@ import shutil
   # keeps every nth frame, regardless of step number, and (2) steps-per-frame
   # keeps only frames whose step number is divisible by it.
 # step numbers are kept from the original trajectory, unless --setSteps is
-  # given (only with --steps-per-frame), which renumbers the starting from 0.
+  # given (only with --steps-per-frame), which renumbers the steps as
+  # consecutive multiples of steps-per-frame.
+# the coarse file is named after the trajectory and written next to it, unless
+  # --out gives a name, or --outHere writes it to the current folder.
 # dryRun reports the step counts without writing anything; adding printSteps
   # also lists the step of every frame and its step after coarsening.
 
@@ -27,6 +30,7 @@ def main():
 	parser = argparse.ArgumentParser()
 	parser.add_argument('datFile',type=str)
 	parser.add_argument('--out',type=str,default=None)
+	parser.add_argument('--outHere',action='store_true')
 	parser.add_argument('--coarse-time',type=int,default=None)
 	parser.add_argument('--steps-per-frame',type=int,default=None)
 	parser.add_argument('--precision',type=int,default=8)
@@ -45,6 +49,9 @@ def main():
 	if args.setSteps and args.steps_per_frame is None:
 		print("Error: setSteps can only be used with steps-per-frame.\n")
 		sys.exit(1)
+	if args.outHere and args.out is not None:
+		print("Error: Cannot set both out and outHere.\n")
+		sys.exit(1)
 	if args.printSteps and not args.dryRun:
 		print("Error: printSteps can only be used with dryRun.\n")
 		sys.exit(1)
@@ -52,13 +59,13 @@ def main():
 		print("Error: Coarse time must be 1 or greater.\n")
 		sys.exit(1)
 	if args.steps_per_frame is not None and args.steps_per_frame < 1:
-		print("Error: Steps per frame must integer over 1.\n")
+		print("Error: Steps per frame must be 1 or greater.\n")
 		sys.exit(1)
 	if args.coarse_time is None and args.steps_per_frame is None:
 		args.coarse_time = 1
 
 	### read old, write new
-	readWriteOxDNA(args.datFile, args.out, args.coarse_time, args.steps_per_frame, args.setSteps, args.hush, args.precision, args.keepVelocity, args.update, args.dryRun, args.printSteps)
+	readWriteOxDNA(args.datFile, args.out, args.outHere, args.coarse_time, args.steps_per_frame, args.setSteps, args.hush, args.precision, args.keepVelocity, args.update, args.dryRun, args.printSteps)
 	if not args.hush: print()
 
 
@@ -66,9 +73,11 @@ def main():
 ### File Managers
 
 ### read oxdna trajectory, write coarsened one
-def readWriteOxDNA(datFile, outDatFile, coarse_time, steps_per_frame, setSteps, hush, precision, keepVelocity, update, dryRun, printSteps):
+def readWriteOxDNA(datFile, outDatFile, outHere, coarse_time, steps_per_frame, setSteps, hush, precision, keepVelocity, update, dryRun, printSteps):
 	if outDatFile is None:
 		outDatFile = getCoarseName(datFile, coarse_time, steps_per_frame)
+		if outHere:
+			outDatFile = os.path.basename(outDatFile)
 
 	### extract metadata
 	checkFileExist(datFile, "trajectory", requireData=True)
