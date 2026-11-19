@@ -1,0 +1,31 @@
+## Number of objects
+	N atoms
+	N bonds
+	N angles
+
+## Number of object types
+	N atom types
+	N bond types
+	N angle types
+
+## Simulation box
+	-d d xlo xhi
+	-d d ylo yhi
+	-d d zlo zhi
+
+Masses
+
+	N	m
+
+Atoms
+
+	N	N	N	x	y	z
+
+Bonds
+
+	N	N	N	N
+
+Angles
+
+	N	N	N	N	N
+

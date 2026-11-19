@@ -1,0 +1,52 @@
+
+#------ Begin Input ------#
+# Template version: 2.5 on 06/20/26
+
+## Variables
+variable nstep_eq equal			1e5
+variable nstep_prod equal		1e7
+variable thermo_every equal		1e4
+variable dump_every equal		1e4
+
+## Initialization
+units			nano
+dimension		3
+boundary		p p p
+atom_style		molecular
+read_data		geo_ds_bp256.in
+
+## System definition
+neighbor		4.00 bin
+neigh_modify	every 10
+pair_style      lj/cut 2.40
+pair_modify     shift yes
+pair_coeff      1 1 27.84 2.14 2.40
+bond_style		harmonic
+bond_coeff		1 556.80 2.72
+angle_style		harmonic
+angle_coeff		1 38.05 180
+
+## Equilibration
+velocity		all create 500 37
+fix				tstat1 all langevin 500 500 0.0489 37
+fix				tstat2 all nve/limit 0.05
+thermo_style	custom step temp pe ke etotal
+thermo			${thermo_every}
+timestep		0.01
+run				${nstep_eq}
+unfix			tstat1
+unfix			tstat2
+reset_timestep	0
+
+## Simulation
+fix				tstat1 all langevin 300 300 0.0489 37
+fix				tstat2 all nve
+dump			dump1 all atom ${dump_every} trajectory.dat
+dump_modify		dump1 sort id
+thermo_style	custom step temp pe ke etotal
+thermo			${thermo_every}
+timestep		0.01
+run				${nstep_prod}
+
+#------- End Input -------#
+
