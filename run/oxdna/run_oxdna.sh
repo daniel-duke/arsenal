@@ -15,7 +15,7 @@
 ### environment
 oxdna_gpu=$OXDNA_GPU
 oxdna_cpu=${OXDNA_CPU:-$OXDNA_GPU}
-coarsener=$ars/coarsenOxDNA.py
+coarsener=$ARS/coarsenOxDNA.py
 scratch_root=$SCRATCH_ROOT
 
 ### settings
