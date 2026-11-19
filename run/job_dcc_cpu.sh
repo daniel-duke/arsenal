@@ -13,10 +13,11 @@
 
 ### modules
 module purge
-module load slurm
+# module load OpenMPI/4.1.6
 
 ### python
 source /hpc/group/aryalab/dhd13/miniconda3/etc/profile.d/conda.sh
 conda activate
 
 ### run
+bash run.sh
